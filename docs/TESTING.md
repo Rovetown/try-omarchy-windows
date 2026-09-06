@@ -113,7 +113,35 @@ Use the copied guest for interruption and low-space tests.
   With Omarchy closed and the matching original factory payload restored,
   returning that retained pair to `vm` should recover the previous guest.
 
-## Coverage
+## Installation moves in the next preview
+
+Use a disposable copy and the candidate launcher throughout. Record source and
+destination filesystem, allocated size, logical disk capacity, elapsed time,
+launcher hash, and guest/runtime hashes.
+
+- [ ] Move default to another drive, custom to custom, and back to default.
+  Include same-volume moves, Unicode/spaces, and long paths. Retain unrelated
+  installation files and recovery folders; shared folders stay external.
+- [ ] Start from Desktop, Start menu, a downloaded candidate, and explicit
+  `-dir` pointing at the old location. Each must use the moved guest. Open
+  Settings from the old executable, then clean up the previous location.
+- [ ] Confirm logical capacity and file checksums, sparse allocation, timestamps,
+  Apps & features registration, and absence of unnecessary payload downloads.
+- [ ] Cancel copying and terminate the helper during copying, directory
+  publication, shortcut/registry updates, and retained-copy cleanup. Restart the
+  candidate and verify recovery without booting a stale disk.
+- [ ] Try low space, a disconnected drive, an occupied destination, links,
+  additional NTFS data streams, a pending update, and a running/orphaned guest.
+  Errors must keep data intact and identify the remaining recovery action.
+- [ ] Keep a second Settings window open during a move. It must neither save to
+  the old location nor recreate removed files. Uninstall after cleanup, then
+  reinstall from the downloaded candidate without stale redirects.
+- [ ] Move an independent restored copy while another installation owns the
+  default pointer. Its default selection and shortcuts must remain unchanged.
+- [ ] Check Settings at the smallest supported display size and scaling, keyboard
+  navigation, full-path visibility, progress, and cancellation.
+
+## Hardware coverage
 
 Track results for Intel and AMD CPUs, integrated and discrete Intel/AMD/NVIDIA
 GPUs, Windows Home and Pro, and each advertised Windows version. Include a

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Added a Settings flow for moving a stopped standard installation to another
+  local drive or folder, with verified copying, updated launch locations, and
+  cleanup of the retained original after a successful guest boot.
+- Reduced the CPU work of detecting empty blocks during restore. Full Windows
+  restore timings are still pending; see [performance notes](docs/PERFORMANCE.md).
+- Reclaim now stops on a short disk read instead of examining an incomplete block.
+- Shared bounded runtime-receipt parsing while preserving its existing checks.
+
+Installation moves still need candidate validation on Windows before release.
+
 ## v0.0.14-preview - 2026-09-05
 
 ### Features

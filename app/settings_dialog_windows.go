@@ -31,51 +31,76 @@ var (
 )
 
 const (
-	wsCaption            = 0x00C00000
-	wsSysmenu            = 0x00080000
-	wsBorder             = 0x00800000
-	wsTabstop            = 0x00010000
-	wsVscroll            = 0x00200000
-	esAutohscroll        = 0x0080
-	esMultiline          = 0x0004
-	esAutovscroll        = 0x0040
-	bsAutocheckbox       = 0x0003
-	bsDefpushbutton      = 0x0001
-	bmGetcheck           = 0x00F0
-	bmSetcheck           = 0x00F1
-	bstChecked           = 1
-	idcArrow             = 32512
-	colorBtnface         = 15
-	defaultGuiFont       = 17
-	wmGettextlength      = 0x000E
-	wmGettext            = 0x000D
-	settingsSaveID       = 2001
-	settingsCancelID     = 2002
-	settingsBrowseID     = 2003
-	settingsFullID       = 2010
-	settingsMemID        = 2011
-	settingsShareID      = 2012
-	settingsFwdID        = 2013
-	settingsKeyID        = 2014
-	settingsShareOnID    = 2015
-	settingsDiskID       = 2016
-	settingsBackupID     = 2020
-	settingsRestoreID    = 2021
-	settingsResetID      = 2022
-	settingsRenderAutoID = 2023
-	settingsRenderGPUID  = 2024
-	settingsRenderCPUID  = 2025
-	settingsCPUsID       = 2026
-	settingsUninstallID  = 2027
-	bsAutoradiobutton    = 0x0009
-	wsGroup              = 0x00020000
-	settingsRecoveryDone = 0x8010
+	wsCaption             = 0x00C00000
+	wsSysmenu             = 0x00080000
+	wsBorder              = 0x00800000
+	wsTabstop             = 0x00010000
+	wsVscroll             = 0x00200000
+	esAutohscroll         = 0x0080
+	esMultiline           = 0x0004
+	esAutovscroll         = 0x0040
+	bsAutocheckbox        = 0x0003
+	bsDefpushbutton       = 0x0001
+	bmGetcheck            = 0x00F0
+	bmSetcheck            = 0x00F1
+	bstChecked            = 1
+	idcArrow              = 32512
+	colorBtnface          = 15
+	defaultGuiFont        = 17
+	wmGettextlength       = 0x000E
+	wmGettext             = 0x000D
+	settingsSaveID        = 2001
+	settingsCancelID      = 2002
+	settingsBrowseID      = 2003
+	settingsFullID        = 2010
+	settingsMemID         = 2011
+	settingsShareID       = 2012
+	settingsFwdID         = 2013
+	settingsKeyID         = 2014
+	settingsShareOnID     = 2015
+	settingsDiskID        = 2016
+	settingsBackupID      = 2020
+	settingsRestoreID     = 2021
+	settingsResetID       = 2022
+	settingsRenderAutoID  = 2023
+	settingsRenderGPUID   = 2024
+	settingsRenderCPUID   = 2025
+	settingsCPUsID        = 2026
+	settingsUninstallID   = 2027
+	settingsMoveID        = 2028
+	settingsMoveCleanupID = 2029
+	bsAutoradiobutton     = 0x0009
+	wsGroup               = 0x00020000
+	settingsRecoveryDone  = 0x8010
 )
 
 // runSettingsDialog shows the window and returns once it closes. saved is
 // true when the file was written.
 func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
+	if !portable {
+		if self, err := os.Executable(); err == nil {
+			if resolved, err := prepareMovedLocation(filepath.Dir(self), false); err == nil && !pathsEqual(resolved, filepath.Dir(self)) {
+				cmd := exec.Command(filepath.Join(resolved, stableLauncherName), "-dir", dataDir, "-settings")
+				if err := cmd.Start(); err != nil {
+					errorBox("Could not reopen moved Settings: " + err.Error())
+				}
+				return false
+			}
+		}
+	}
 	runtime.LockOSThread()
+	guard, err := lockMoveStore(hostMoveStore())
+	if err != nil {
+		errorBox(err.Error())
+		return false
+	}
+	defer guard.Close()
+	if !portable {
+		if err := checkMovedSettings(dataDir); err != nil {
+			errorBox(err.Error())
+			return false
+		}
+	}
 	current, err := loadSettingsWithRepair(path)
 	if err != nil {
 		if errors.Is(err, errSetupCancelled) {
@@ -93,6 +118,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		errorBox("Try Omarchy cannot read its storage preferences:\n\n" + err.Error())
 		return false
 	}
+	guard.Close()
 	hInst, _, _ := procGetModuleHandleW.Call(0)
 	className, _ := syscall.UTF16PtrFromString("TryOmarchySettings")
 	var hwnd uintptr
@@ -150,6 +176,18 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		case wmCommand:
 			switch wParam & 0xffff {
 			case settingsSaveID:
+				guard, err := lockMoveStore(hostMoveStore())
+				if err != nil {
+					errorBox(err.Error())
+					return 0
+				}
+				defer guard.Close()
+				if !portable {
+					if err := checkMovedSettings(dataDir); err != nil {
+						errorBox(err.Error())
+						return 0
+					}
+				}
 				s, err := collect()
 				diskGiB := storage.DiskGiB
 				if err == nil && !portable {
@@ -182,6 +220,10 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				procDestroyWindow.Call(h)
 			case settingsBrowseID:
 				browseFolder()
+			case settingsMoveID:
+				launchRecovery("move")
+			case settingsMoveCleanupID:
+				launchRecovery("move-cleanup")
 			case settingsBackupID:
 				launchRecovery("backup")
 			case settingsRestoreID:
@@ -193,6 +235,16 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 			}
 			return 0
 		case settingsRecoveryDone:
+			if !portable {
+				if resolved, err := prepareMovedLocation(dataDir, false); err == nil && !pathsEqual(resolved, dataDir) {
+					cmd := exec.Command(filepath.Join(resolved, stableLauncherName), "-dir", resolved, "-settings")
+					if err := cmd.Start(); err != nil {
+						errorBox("Open Settings at " + resolved + ": " + err.Error())
+					}
+					procDestroyWindow.Call(h)
+					return 0
+				}
+			}
 			procEnableWindow.Call(h, 1)
 			procSetForegroundWindow.Call(h)
 			return 0
@@ -303,6 +355,9 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	}
 	mk("STATIC", status, left, y, clientW-2*left, 20, ssNoprefix, 0)
 	y += 26
+	mk("STATIC", "Location", left, y+3, labelW, 20, ssNoprefix, 0)
+	mk("EDIT", dataDir, fieldX, y, fieldW, 22, wsBorder|wsTabstop|esAutohscroll|0x0800, 0) // ES_READONLY; long paths remain selectable.
+	y += 24
 	mk("STATIC", "Shared folder", left, y+3, labelW, 20, ssNoprefix, 0)
 	hShare = mk("EDIT", current.Share, fieldX, y, fieldW-80, 24, wsBorder|wsTabstop|esAutohscroll, settingsShareID)
 	mk("BUTTON", "Browse...", fieldX+fieldW-72, y, 72, 24, wsTabstop, settingsBrowseID)
@@ -314,9 +369,9 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	}
 	y += 34
 	mk("STATIC", "Port forwards, one per line\n(tcp:2222:22 forwards\n127.0.0.1:2222 to sshd)", left, y+3, labelW, 60, ssNoprefix, 0)
-	hFwd = mk("EDIT", strings.Join(current.Forwards, "\r\n"), fieldX, y, fieldW, 96,
+	hFwd = mk("EDIT", strings.Join(current.Forwards, "\r\n"), fieldX, y, fieldW, 72,
 		wsBorder|wsTabstop|wsVscroll|esMultiline|esAutovscroll, settingsFwdID)
-	y += 106
+	y += 82
 	mk("STATIC", "SSH public key file\n(blank: your ~/.ssh/id_*.pub)", left, y+3, labelW, 40, ssNoprefix, 0)
 	hKey = mk("EDIT", current.SSHKey, fieldX, y, fieldW, 24, wsBorder|wsTabstop|esAutohscroll, settingsKeyID)
 	// The two-line key label above is 40 px tall from y+3; start the next
@@ -344,11 +399,17 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	}
 	mk("STATIC", help, left, y, clientW-2*left, 20, ssNoprefix, 0)
 	y += 26
-	uninstallButton := mk("BUTTON", "Remove Try Omarchy...", left, y, 160, 26, wsTabstop, settingsUninstallID)
+	uninstallButton := mk("BUTTON", "Uninstall...", left, y, 140, 26, wsTabstop, settingsUninstallID)
+	moveButton := mk("BUTTON", "Move...", left+150, y, 140, 26, wsTabstop, settingsMoveID)
+	cleanupButton := mk("BUTTON", "Remove previous...", left+300, y, 140, 26, wsTabstop, settingsMoveCleanupID)
+	state, stateErr := hostMoveStore().load()
 	if portable {
 		procEnableWindow.Call(uninstallButton, 0)
+		procEnableWindow.Call(moveButton, 0)
 	}
-	mk("STATIC", "Deletes this installation after offering a backup.", left+170, y+5, clientW-2*left-170, 20, ssNoprefix, 0)
+	if portable || stateErr != nil || state.Retained == nil || !state.Retained.Booted || !pathsEqual(state.Retained.Destination, dataDir) {
+		procEnableWindow.Call(cleanupButton, 0)
+	}
 	mk("BUTTON", "Save", clientW-16-180, clientH-40, 84, 26, bsDefpushbutton|wsTabstop, settingsSaveID)
 	mk("BUTTON", "Cancel", clientW-16-84, clientH-40, 84, 26, wsTabstop, settingsCancelID)
 	// Settings is often opened from the tray while the maximized QEMU window

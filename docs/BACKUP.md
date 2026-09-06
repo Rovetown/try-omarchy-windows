@@ -87,13 +87,17 @@ review them before starting a restored copy on another machine.
 
 ## Space and validation
 
-Both operations conservatively require free space for the full logical size of
-all included files, plus 1 GiB. Compression and sparse files can reduce actual
-usage, but are not counted on for the space check. Large disks can take a while
-to read even when mostly empty.
+Backup conservatively requires free space for the full logical size of all
+included files, plus 1 GiB. Restore estimates space from the compressed file
+sizes, adds a 25 percent margin and 1 GiB, and preserves empty regions as sparse
+holes. This is an estimate, not a guarantee that the destination will have enough
+space. A disk-full error stops restore before the new folder is published.
+Large disks can take a while to read even when mostly empty.
 
 Automated tests cover copying, checksums, cancellation, disk locking, low space,
-and preservation of existing folders. A restored guest still needs a Windows
-boot test before release. Keep the original installation until you have checked
-the restored copy. The Settings dialogs and a restored guest boot still need hands-on Windows
-validation before release (#36).
+and preservation of existing folders. Repeat the Settings and restored-guest
+boot checks for the exact release candidate using [TESTING.md](TESTING.md).
+Keep the original installation until you have checked the restored copy.
+
+For changing the active installation's location, see the next preview's
+[move flow](MOVING.md). Restore continues to create an independent copy.

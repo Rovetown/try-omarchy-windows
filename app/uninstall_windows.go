@@ -154,6 +154,9 @@ func runUninstall(dir string) error {
 	if msgBox("Remove Try Omarchy and delete "+dir+" now?", mbYesNo|mbIconQuestion|mbDefbutton2) != idYes {
 		return nil
 	}
+	if err := forgetMovedInstallation(dir); err != nil {
+		return err
+	}
 	target := filepath.Join(dir, stableLauncherName)
 	if err := removeLauncherShortcuts(target); err != nil {
 		logf("uninstall: %v", err)

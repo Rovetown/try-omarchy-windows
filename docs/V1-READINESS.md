@@ -17,11 +17,11 @@ upgrade reliability.
   establish that the full release workflow works.
 - [ ] Test a copied pre-transfer installation through the signed update path
   into the current candidate. Verify redirects, preserved files, and rollback
- , separately from preview-to-stable migration.
+  separately from preview-to-stable migration.
 - [ ] Prepare release notes and verify public download links, signatures, and
   versions after publication.
 
-## Merged for release testing
+## Shipped features requiring candidate regression checks
 
 - [#34](https://github.com/omacom/try-omarchy-windows/pull/34): stable updates,
   including a bridge for installations that skip preview releases.
@@ -29,7 +29,9 @@ upgrade reliability.
   in-place growth, and Windows free-space information.
 - [#29](https://github.com/omacom/try-omarchy-windows/pull/29): official artwork,
   current resources, and splash icon handling.
-- First-run install-location selection is on master and needs release testing.
+- First-run install-location selection shipped in v0.0.12-preview. Repeat its
+  checks on the candidate; moving an existing installation is separate work in
+  [NEXT-RELEASE.md](NEXT-RELEASE.md).
 
 ## Release gates
 
@@ -62,6 +64,6 @@ v1 should provide a dependable way to try Omarchy, keep a trial setup, and take
 its configuration to a full installation. Prioritize reliability, storage,
 recovery, and understandable controls.
 
-Image clipboard and better file transfers can follow the core work. Camera
+Image clipboard shipped in v0.0.13-preview. Better file transfers, camera
 bridging, Windows ARM64, and additional portable launchers remain later work.
 Booting an existing physical installation is outside the v1 scope.
