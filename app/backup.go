@@ -252,14 +252,7 @@ func readVMBackup(z *zip.ReadCloser) (backupManifest, map[string]*zip.File, erro
 type backupSparseWriter struct{ file *os.File }
 
 func (w backupSparseWriter) Write(p []byte) (int, error) {
-	zero := true
-	for _, b := range p {
-		if b != 0 {
-			zero = false
-			break
-		}
-	}
-	if zero {
+	if zeroBytes(p) {
 		_, err := w.file.Seek(int64(len(p)), io.SeekCurrent)
 		if err != nil {
 			return 0, err
