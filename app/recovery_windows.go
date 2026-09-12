@@ -39,6 +39,23 @@ func beginRecoveryProgress(status string) {
 func runRecoveryUI(dir, action string) error {
 	configureSetupCancellation(false)
 	switch action {
+	case "portable-create":
+		parent, ok, err := chooseRecoveryPath(0, "Choose where to create the portable copy", "", false, true)
+		if err != nil || !ok {
+			return err
+		}
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(parent, "OmarchyPortable-"+time.Now().Format("20060102-150405"))
+		beginRecoveryProgress("Creating your portable copy...")
+		err = createPortableCopy(dir, destination, self, recoveryProgress("Copying"))
+		uiDone()
+		if err != nil {
+			return err
+		}
+		infoBox("Portable copy created at:\n\n" + destination + "\n\nOpen Start Omarchy.cmd in that folder. Your original installation was kept.")
 	case "snapshots":
 		return runCheckpointUI(dir)
 	case "move", "move-cleanup":

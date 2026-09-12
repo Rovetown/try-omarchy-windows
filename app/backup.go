@@ -94,7 +94,19 @@ func writeVMArchive(dir, destination string, report backupProgress, checkpoint b
 			return fmt.Errorf("finish the pending update before backing up")
 		}
 	}
-	disk, err := openBackupDisk(filepath.Join(dir, "vm", "disk.raw"))
+	inventory, err := inspectInstallationDisk(dir)
+	if err != nil {
+		return err
+	}
+	if inventory.Format == "qcow2" && report != nil {
+		report(0, inventory.VirtualBytes, "Preparing portable disk")
+	}
+	diskPath, cleanup, err := materializeInstallationDisk(dir, filepath.Dir(destination), inventory)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	disk, err := openBackupDisk(diskPath)
 	if err != nil {
 		return fmt.Errorf("close Try Omarchy before backing up: %w", err)
 	}
@@ -104,6 +116,9 @@ func writeVMArchive(dir, destination string, report backupProgress, checkpoint b
 	var total int64
 	for _, root := range []string{"guest", "runtime", "vm/disk.raw", "settings.json", storageSettingsFilename} {
 		full := filepath.Join(dir, filepath.FromSlash(root))
+		if root == "vm/disk.raw" {
+			full = diskPath
+		}
 		if _, err := os.Lstat(full); os.IsNotExist(err) {
 			continue
 		}
@@ -118,11 +133,14 @@ func writeVMArchive(dir, destination string, report backupProgress, checkpoint b
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(dir, name)
-			if err != nil {
-				return err
+			rel := root
+			if root != "vm/disk.raw" {
+				rel, err = filepath.Rel(dir, name)
+				if err != nil {
+					return err
+				}
+				rel = filepath.ToSlash(rel)
 			}
-			rel = filepath.ToSlash(rel)
 			if !info.Mode().IsRegular() || !backupNameAllowed(rel) {
 				return fmt.Errorf("cannot back up unsupported file %s", rel)
 			}

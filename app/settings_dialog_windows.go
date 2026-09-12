@@ -71,6 +71,7 @@ const (
 	settingsMoveCleanupID = 2029
 	settingsHelpID        = 2030
 	settingsSnapshotsID   = 2031
+	settingsPortableID    = 2032
 	bsAutoradiobutton     = 0x0009
 	wsGroup               = 0x00020000
 	settingsRecoveryDone  = 0x8010
@@ -163,7 +164,11 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 			errorBox(err.Error())
 			return
 		}
-		cmd := exec.Command(self, "-dir", dataDir, "-recovery", action)
+		args := []string{"-dir", dataDir, "-recovery", action}
+		if portable {
+			args = append(args, "-portable")
+		}
+		cmd := exec.Command(self, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 		if err = cmd.Start(); err != nil {
 			errorBox("Could not open recovery controls:\n\n" + err.Error())
@@ -232,6 +237,8 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				launchRecovery("move")
 			case settingsMoveCleanupID:
 				launchRecovery("move-cleanup")
+			case settingsPortableID:
+				launchRecovery("portable-create")
 			case settingsSnapshotsID:
 				launchRecovery("snapshots")
 			case settingsBackupID:
@@ -411,20 +418,21 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		x     int32
 	}{{"Back up...", settingsBackupID, left}, {"Restore...", settingsRestoreID, left + 112}, {"Snapshots...", settingsSnapshotsID, left + 224}, {"Reset guest...", settingsResetID, left + 336}} {
 		button := mk("BUTTON", control.label, control.x, y, 104, 26, wsTabstop, control.id)
-		if portable {
+		if portable && control.id == settingsResetID {
 			procEnableWindow.Call(button, 0)
 		}
 	}
 	y += 30
 	help := "Close Omarchy first. Backups use saved settings. Restore creates a separate copy."
 	if portable {
-		help = "Backup and recovery controls are available for standard installs."
+		help = "Backups and snapshots create independent copies. Close Omarchy first."
 	}
 	mk("STATIC", help, left, y, clientW-2*left, 36, ssNoprefix, 0)
 	y += 42
-	uninstallButton := mk("BUTTON", "Uninstall...", left, y, 140, 26, wsTabstop, settingsUninstallID)
-	moveButton := mk("BUTTON", "Move...", left+150, y, 140, 26, wsTabstop, settingsMoveID)
-	cleanupButton := mk("BUTTON", "Remove previous...", left+300, y, 140, 26, wsTabstop, settingsMoveCleanupID)
+	uninstallButton := mk("BUTTON", "Uninstall...", left, y, 104, 26, wsTabstop, settingsUninstallID)
+	moveButton := mk("BUTTON", "Move...", left+112, y, 104, 26, wsTabstop, settingsMoveID)
+	cleanupButton := mk("BUTTON", "Clean up...", left+224, y, 104, 26, wsTabstop, settingsMoveCleanupID)
+	mk("BUTTON", "Portable copy...", left+336, y, 104, 26, wsTabstop, settingsPortableID)
 	state, stateErr := hostMoveStore().load()
 	if portable {
 		procEnableWindow.Call(uninstallButton, 0)

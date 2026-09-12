@@ -95,3 +95,28 @@ Continue with the shared installation inventory and portable storage support.
 Checkpoint work still includes incremental storage, interrupted-stage cleanup
 and integrated recovery acceptance with real guest data. Saved sessions need
 the graphics-state implementation identified in the source audit.
+
+### Portable storage implementation
+
+The installation inventory now identifies raw disks, factory-backed QCOW2
+and standalone QCOW2. Portable backups and checkpoints materialize a verified
+standalone raw disk, so the same restore path works across storage modes.
+Conversion uses the bundled QEMU image tool with explicit backing format,
+checks the backing image digest, supports cancellation and removes failed
+staging. Both the source overlay and its factory image remain intact.
+
+Settings now enables portable backup, restore and snapshots, and offers
+Portable copy. Creation archives and restores the existing installation into
+private staging, converts the disk to standalone QCOW2, compares its logical
+contents, copies the launcher and verified manifest, and publishes the complete
+folder with relative launch scripts. It requires matching installed payloads.
+
+Tests include real guest writes in a QCOW2 overlay followed by backup and
+restore, source preservation, corruption rejection and staging cleanup.
+Portable creation and disk conversion also passed against the bundled Windows
+runtime using synthetic guest fixtures. Windows AMD64 and ARM64 launcher
+cross-builds succeed; native ARM guest/runtime integration remains active work.
+
+The expanded Settings controls also passed the interactive Windows test at a
+500-pixel work-area height: both new buttons remained visible, 60 Tab/Shift+Tab
+steps kept focus visible, and mouse scrolling stayed in position.

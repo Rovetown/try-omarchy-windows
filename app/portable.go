@@ -187,3 +187,12 @@ func renamePortableFileWith(
 	}
 	return renameErr
 }
+
+// Portable recovery exports a standalone copy while keeping its original
+// overlay and payload together. Destination selection belongs to the dialog.
+func portableRecoveryAllowed(action, backup, restore string) bool {
+	if restore != "" {
+		return false
+	}
+	return action == "backup" || action == "restore" || action == "snapshots" || action == "portable-create" || action == "" && backup != ""
+}

@@ -284,6 +284,16 @@ func prepareDisk(cfg *config, expandedMiB int64) error {
 // staging file. Its backing path is relative so drive-letter changes do not
 // break it, and an interrupted creation never appears under the final name.
 func preparePortableDisk(cfg *config, expandedBytes int64) error {
+	if _, err := os.Lstat(cfg.disk); err == nil {
+		disk, inspectErr := inspectInstallationDisk(cfg.dir)
+		if inspectErr == nil && disk.Format == "qcow2" && disk.Backing == "" {
+			if disk.VirtualBytes < expandedBytes {
+				return fmt.Errorf("portable disk is smaller than the requested size")
+			}
+			return nil
+		}
+	}
+
 	backing := filepath.ToSlash(filepath.Join("..", "guest", "rootfs.ext4"))
 	backingSHA256, ok := installReceiptArtifactSHA256(cfg.guestDir, "rootfs.ext4")
 	if !ok {
