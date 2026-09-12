@@ -15,20 +15,22 @@ const (
 )
 
 type config struct {
-	dir, hostDir, payloadDir string
-	winqEmu, share           string
-	fresh, fullscreen, noGpu bool
-	hostCursor               bool
-	instant, portable        bool
-	guestDir, vmDir, disk    string
-	diskFormat               string
-	qemu                     string
-	useGpu                   bool
-	supportsSharing          bool
-	audio                    string
-	memMiB                   int
-	forwards                 []portForward
-	sshKey                   string
+	dir, hostDir, payloadDir    string
+	winqEmu, share              string
+	fresh, fullscreen, noGpu    bool
+	hostCursor                  bool
+	instant, portable           bool
+	guestDir, vmDir, disk       string
+	diskFormat                  string
+	qemu                        string
+	useGpu                      bool
+	supportsSharing             bool
+	audio                       string
+	memMiB                      int
+	displays                    int
+	displayWidth, displayHeight int
+	forwards                    []portForward
+	sshKey                      string
 	// Guest RAM chosen by the user (settings.json or -memory); 0 = automatic.
 	memOverrideMiB int
 	diskGiB        int

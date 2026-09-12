@@ -32,7 +32,7 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 	if cfg.useGpu {
 		args = append(args,
 			"-machine", machine, "-cpu", "host", "-smp", smp, "-m", mem,
-			"-device", "virtio-vga-gl,blob=on,hostmem="+hostmem+",venus=on",
+			"-device", displayDevice(cfg, hostmem),
 			// The guest cursor is visible in the QEMU profile. Forcing SDL's host
 			// cursor as well produces two pointers that separate during motion.
 			// Keep only the guest cursor unless the diagnostic fallback is set.
@@ -46,7 +46,7 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 		args = append(args,
 			"-machine", machine, "-cpu", "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+aes",
 			"-smp", smp, "-m", mem,
-			"-vga", "none", "-device", "virtio-gpu-pci,id=gpu0",
+			"-vga", "none", "-device", displayDevice(cfg, hostmem),
 			"-display", sdlDisplay(false, cfg.hostCursor),
 			"-serial", "file:"+filepath.Join(vm, "serial.log"),
 		)

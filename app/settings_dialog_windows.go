@@ -72,6 +72,7 @@ const (
 	settingsHelpID        = 2030
 	settingsSnapshotsID   = 2031
 	settingsPortableID    = 2032
+	settingsDisplaysID    = 2033
 	bsAutoradiobutton     = 0x0009
 	wsGroup               = 0x00020000
 	settingsRecoveryDone  = 0x8010
@@ -127,7 +128,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	var hwnd uintptr
 	var scroll settingsScroll
 	var hFull, hMem, hCPUs, hDisk, hShare, hShareOn, hFwd, hKey uintptr
-	var hRenderAuto, hRenderGPU, hRenderCPU uintptr
+	var hRenderAuto, hRenderGPU, hRenderCPU, hDisplays uintptr
 
 	text := func(handle uintptr) string {
 		n, _, _ := procSendMessageW.Call(handle, wmGettextlength, 0, 0)
@@ -148,8 +149,16 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		} else if r, _, _ := procSendMessageW.Call(hRenderCPU, bmGetcheck, 0, 0); r == bstChecked {
 			render = renderCPU
 		}
-		return settingsFromForm(checked == bstChecked, shareChecked == bstChecked,
+		s, err := settingsFromForm(checked == bstChecked, shareChecked == bstChecked,
 			text(hMem), text(hCPUs), text(hShare), text(hFwd), text(hKey), render)
+		if err != nil {
+			return s, err
+		}
+		s.Displays, err = strconv.Atoi(strings.TrimSpace(text(hDisplays)))
+		if err != nil || s.Displays < 1 || s.Displays > maximumGuestDisplays {
+			return s, fmt.Errorf("choose 1 to %d guest displays", maximumGuestDisplays)
+		}
+		return s, s.validate()
 	}
 	browseFolder := func() {
 		if selected, ok := browseForFolder(hwnd, "Choose the Windows folder to share with Omarchy"); ok {
@@ -294,7 +303,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		return false
 	}
 
-	const clientW, clientH = 480, 714
+	const clientW, clientH = 480, 748
 	rect := [4]int32{0, 0, clientW, clientH}
 	style := uintptr(wsCaption | wsSysmenu | wsVscroll)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rect[0])), style, 0, 0)
@@ -339,6 +348,10 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		procSendMessageW.Call(hFull, bmSetcheck, bstChecked, 0)
 	}
 	y += 30
+	mk("STATIC", "Guest displays", left, y+3, labelW, 20, ssNoprefix, 0)
+	hDisplays = mk("EDIT", strconv.Itoa(guestDisplayCount(current.Displays)), fieldX, y, 100, 24, wsBorder|wsTabstop|esAutohscroll, settingsDisplaysID)
+	mk("STATIC", "1 to 16 displays", fieldX+112, y+3, fieldW-112, 20, ssNoprefix, 0)
+	y += 34
 	mk("STATIC", "Rendering", left, y+3, labelW, 20, ssNoprefix, 0)
 	hRenderAuto = mk("BUTTON", "Automatic", fieldX, y, 90, 22, bsAutoradiobutton|wsGroup|wsTabstop, settingsRenderAutoID)
 	hRenderGPU = mk("BUTTON", "GPU", fieldX+96, y, 60, 22, bsAutoradiobutton, settingsRenderGPUID)

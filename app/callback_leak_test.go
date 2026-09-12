@@ -10,7 +10,7 @@ import (
 
 // syscall.NewCallback permanently reserves one of a hard 2000-entry table and
 // never frees it, so any call on a repeating code path eventually kills the
-// process with "too many callback functions". enforceTitle runs once a second
+// process with "too many callback functions". enforceDisplayWindows runs once a second
 // for the whole life of the app, so a callback built inside it killed the
 // launcher after ~33 minutes and silently took the Windows-key hook with it.
 // Parsed as source because winapi.go is a Windows-only file and CI runs Linux.
@@ -23,7 +23,7 @@ func TestEnforceTitleBuildsNoCallback(t *testing.T) {
 	var checked bool
 	ast.Inspect(file, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "enforceTitle" {
+		if !ok || fn.Name.Name != "enforceDisplayWindows" {
 			return true
 		}
 		checked = true
@@ -33,7 +33,7 @@ func TestEnforceTitleBuildsNoCallback(t *testing.T) {
 				return true
 			}
 			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "syscall" {
-				t.Errorf("enforceTitle builds a callback at %s: it runs once a second, "+
+				t.Errorf("enforceDisplayWindows builds a callback at %s: it runs once a second, "+
 					"so this exhausts the 2000-entry table and kills the launcher",
 					fset.Position(inner.Pos()))
 			}
@@ -42,7 +42,7 @@ func TestEnforceTitleBuildsNoCallback(t *testing.T) {
 		return false
 	})
 	if !checked {
-		t.Fatal("enforceTitle not found in winapi.go - update this guard")
+		t.Fatal("enforceDisplayWindows not found in winapi.go - update this guard")
 	}
 }
 

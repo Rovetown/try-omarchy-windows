@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
@@ -185,7 +186,7 @@ func releaseQemuCursor() {
 	}
 }
 
-// enforceTitle finds the QEMU process's visible top-level window, keeps it
+// The display enforcer finds QEMU's visible display windows and keeps them
 // titled appTitle (QEMU rewrites its own title on every grab toggle, so the
 // caller reasserts this periodically), maximizes it the first time it appears
 // (launch-UX contract: maximized by default, never fullscreen, never a small
@@ -201,54 +202,119 @@ func releaseQemuCursor() {
 // Windows-key hook, the close guard and the clipboard bridge down with it
 // while QEMU kept running, which reads to the user as Windows shortcuts
 // suddenly leaking through. The callback reads its inputs from the enumTitle*
-// variables; only runTitleEnforcer's goroutine calls enforceTitle, so the
+// variables; only runTitleEnforcer's goroutine calls enforceDisplayWindows, so the
 // handoff needs no locking.
+type displayWindowState struct {
+	index int
+	last  *windowPlacement
+}
+
 var (
-	enumTitlePid      uint32
-	enumTitleMaximize *bool
-	enumTitleIcon     uintptr
-	enumTitleCallback = syscall.NewCallback(enumTitleProc)
-	// enumTitleRestore is the remembered placement for this launch; nil keeps
-	// the maximized default.
-	enumTitleRestore *windowPlacement
+	enumTitlePid        uint32
+	enumTitleIcon       uintptr
+	enumTitleDir        string
+	enumTitleFullscreen bool
+	enumTitleWindows    = map[uintptr]*displayWindowState{}
+	enumTitleSeen       = map[uintptr]bool{}
+	enumTitleCallback   = syscall.NewCallback(enumTitleProc)
+	procGetClassNameW   = user32.NewProc("GetClassNameW")
 )
 
+func isQemuDisplayWindow(hwnd uintptr, pid uint32) bool {
+	var owner uint32
+	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&owner)))
+	if pid == 0 || owner != pid {
+		return false
+	}
+	var class [64]uint16
+	procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&class[0])), uintptr(len(class)))
+	return syscall.UTF16ToString(class[:]) == "SDL_app"
+}
+
 func enumTitleProc(hwnd, _ uintptr) uintptr {
-	var wpid uint32
-	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&wpid)))
-	if wpid != enumTitlePid {
+	if !isQemuDisplayWindow(hwnd, enumTitlePid) {
 		return 1
 	}
-	if v, _, _ := procIsWindowVisible.Call(hwnd); v == 0 {
+	if visible, _, _ := procIsWindowVisible.Call(hwnd); visible == 0 {
 		return 1
 	}
-	qemuHwnd.Store(hwnd) // the close guard needs the live window handle
-	uiDone()             // the VM window is on screen: the splash's job is over
-	if *enumTitleMaximize {
-		*enumTitleMaximize = false
-		if enumTitleRestore == nil || !applyPlacement(hwnd, enumTitleRestore) {
-			const swMaximize = 3
-			procShowWindow.Call(hwnd, swMaximize)
-		}
-		setTaskbarIdentity(hwnd) // once per window: our taskbar icon + name
-	}
-	if enumTitleIcon != 0 {
-		const wmSeticonMsg = 0x80
-		procSendMessageW.Call(hwnd, wmSeticonMsg, 1, enumTitleIcon) // ICON_BIG
-		procSendMessageW.Call(hwnd, wmSeticonMsg, 0, enumTitleIcon) // ICON_SMALL
-	}
-	buf := make([]uint16, maxTitle)
+	enumTitleSeen[hwnd] = true
+	var buf [maxTitle]uint16
 	procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), maxTitle)
-	if syscall.UTF16ToString(buf) != appTitle {
-		t, _ := syscall.UTF16PtrFromString(appTitle)
-		procSetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(t)))
+	title := syscall.UTF16ToString(buf[:])
+	state, known := enumTitleWindows[hwnd]
+	index, parsed := displayIndexFromTitle(title)
+	if !known || parsed && state.index != index {
+		if !parsed {
+			return 1
+		}
+		state = &displayWindowState{index: index}
+		enumTitleWindows[hwnd] = state
+		if !enumTitleFullscreen {
+			monitors := monitorRects()
+			placement, err := loadDisplayPlacement(enumTitleDir, index)
+			if err != nil || !placement.usable(monitors) {
+				placement = initialDisplayPlacement(index, monitors)
+			}
+			if placement == nil || !applyPlacement(hwnd, placement) {
+				procShowWindow.Call(hwnd, swShowMaximized)
+			}
+		}
+		if enumTitleFullscreen {
+			monitors := monitorRects()
+			if len(monitors) > 0 {
+				m := monitors[index%len(monitors)]
+				procSetWindowPos.Call(hwnd, 0, uintptr(m.Left), uintptr(m.Top), uintptr(m.width()), uintptr(m.height()), 0x0004|0x0010)
+			}
+		}
+		setTaskbarIdentity(hwnd)
+	}
+	uiDone()
+	if enumTitleIcon != 0 {
+		procSendMessageW.Call(hwnd, 0x80, 1, enumTitleIcon)
+		procSendMessageW.Call(hwnd, 0x80, 0, enumTitleIcon)
+	}
+	wanted := appTitle
+	if state.index > 0 {
+		wanted = fmt.Sprintf("%s display %d", appTitle, state.index+1)
+	}
+	if title != wanted {
+		value, _ := syscall.UTF16PtrFromString(wanted)
+		procSetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(value)))
+	}
+	if !enumTitleFullscreen {
+		if now := capturePlacement(hwnd); now != nil && !now.sameAs(state.last) {
+			now.SavedAt = time.Now()
+			if saveDisplayPlacement(enumTitleDir, state.index, *now) == nil {
+				state.last = now
+			}
+		}
 	}
 	return 1
 }
 
-func enforceTitle(pid uint32, maximize *bool, appIcon uintptr, restore *windowPlacement) {
-	enumTitlePid, enumTitleMaximize, enumTitleIcon, enumTitleRestore = pid, maximize, appIcon, restore
+func enforceDisplayWindows(pid uint32, dir string, fullscreen bool, icon uintptr) {
+	if pid != enumTitlePid {
+		enumTitleWindows = map[uintptr]*displayWindowState{}
+	}
+	enumTitlePid, enumTitleDir, enumTitleFullscreen, enumTitleIcon = pid, dir, fullscreen, icon
+	enumTitleSeen = map[uintptr]bool{}
 	procEnumWindows.Call(enumTitleCallback, 0)
+	foreground, _, _ := procGetForegroundWindow.Call()
+	selected := uintptr(0)
+	for hwnd, state := range enumTitleWindows {
+		if !enumTitleSeen[hwnd] {
+			delete(enumTitleWindows, hwnd)
+			continue
+		}
+		if selected == 0 || state.index == 0 {
+			selected = hwnd
+		}
+	}
+	if _, ok := enumTitleWindows[foreground]; ok {
+		selected = foreground
+	}
+	qemuHwnd.Store(selected)
 }
 
 func clipboardGetText() (string, bool) {

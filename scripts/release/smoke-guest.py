@@ -91,6 +91,7 @@ def main() -> None:
     parser.add_argument("artifacts", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--package-update", action="store_true", help="also exercise pacman against current signed repositories in the disposable snapshot")
+    parser.add_argument("--displays", type=int, choices=range(1, 17), help="also boot the graphical desktop and verify this many guest displays")
     args = parser.parse_args()
     if args.package_update:
         FACT_CHECKS["package-update"] = "sudo pacman -Syu --noconfirm >/tmp/tryomarchy-package-update.log 2>&1 && echo yes || { cat /tmp/tryomarchy-package-update.log >&2; echo no; }"
@@ -102,7 +103,14 @@ def main() -> None:
     spec = json.loads((args.artifacts / "build-spec.json").read_text(encoding="utf-8"))
     cmdline = spec["runtime"]["kernelCommandLine"]
     cmdline = cmdline.replace("console=tty0 ", "").replace("console=hvc0", "console=ttyS0")
-    cmdline += " tryomarchy.instant=1 systemd.unit=multi-user.target"
+    cmdline += " tryomarchy.instant=1"
+    cmdline += " systemd.unit=graphical.target tryomarchy.render=cpu" if args.displays else " systemd.unit=multi-user.target"
+    if args.displays:
+        FACT_CHECKS["guest-displays"] = ("export XDG_RUNTIME_DIR=/run/user/$(id -u); "
+            "for attempt in $(seq 1 60); do instance=$(hyprctl -j instances 2>/dev/null | jq -r '.[0].instance // empty' 2>/dev/null); "
+            "count=$(hyprctl -i \"$instance\" monitors -j 2>/dev/null | jq length 2>/dev/null); "
+            f"test \"$count\" = {args.displays} && break; sleep 1; done; echo ${{count:-0}}")
+        EXPECTED_FACTS["guest-displays"] = str(args.displays)
 
     command = [
         "qemu-system-x86_64",
@@ -140,6 +148,11 @@ def main() -> None:
         "-device",
         "virtio-net-pci,netdev=net0",
     ]
+
+    if args.displays:
+        device = {"driver": "virtio-gpu-pci", "max_outputs": args.displays,
+                  "outputs": [{"name": f"Omarchy {index + 1}", "xres": 1280, "yres": 720} for index in range(args.displays)]}
+        command.extend(["-device", json.dumps(device)])
 
     process = subprocess.Popen(
         command,

@@ -135,3 +135,18 @@ the executable at the bundle root. A native Windows test confirms replacement,
 restart from the root and retention of the previous executable. Native disk
 tests verify that persistent contents survive a changed factory image. Local
 HTTP tests cover payload staging, version selection, corruption and cancellation.
+
+### Multiple display implementation
+
+Settings and `-displays` configure up to the runtime's 16 outputs. Each output
+has a distinct EDID name and initial resolution. Multi-display launches use the
+bundled runtime. The window manager identifies SDL outputs separately, restores
+each placement, brands each window and applies close protection to all of them.
+Display placements are included in backups and checkpoints.
+
+A graphical KVM boot of the v17 guest reported three active Hyprland monitors
+and passed the guest smoke checks. Native Windows tests cover the real QEMU
+primary window plus a three-window SDL-class lifecycle fixture, including
+independent identities, saved placements and removal of a closed window.
+Physical GPU, mixed-DPI and monitor hotplug acceptance remains part of the
+integrated Windows round.

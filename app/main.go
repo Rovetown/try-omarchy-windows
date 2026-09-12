@@ -30,18 +30,20 @@ import (
 const appTitle = "Try Omarchy"
 
 type config struct {
-	dir, hostDir, payloadDir string
-	winqEmu, share           string
-	fresh, fullscreen, noGpu bool
-	hostCursor               bool
-	instant, portable        bool
-	guestDir, vmDir, disk    string
-	diskFormat               string
-	qemu                     string
-	useGpu                   bool
-	supportsSharing          bool
-	audio                    string
-	memMiB                   int
+	dir, hostDir, payloadDir    string
+	winqEmu, share              string
+	fresh, fullscreen, noGpu    bool
+	hostCursor                  bool
+	instant, portable           bool
+	guestDir, vmDir, disk       string
+	diskFormat                  string
+	qemu                        string
+	useGpu                      bool
+	supportsSharing             bool
+	audio                       string
+	memMiB                      int
+	displays                    int
+	displayWidth, displayHeight int
 	// kernel-irqchip=off keeps WHPX from requesting nested virtualization,
 	// which some hosts advertise and then refuse (issue #19). Set by the
 	// startup retry, never by a flag.
@@ -132,6 +134,7 @@ func main() {
 	flag.StringVar(&cfg.winqEmu, "winq", `C:\WINQ-EMU`, "WINQ-EMU install path (GPU mode)")
 	flag.StringVar(&cfg.share, "share", "", "Windows folder shared into Omarchy at /mnt/host and as ~/<folder name>")
 	flag.BoolVar(&cfg.fresh, "fresh", false, "start over and retain the previous writable disk for recovery")
+	flag.IntVar(&cfg.displays, "displays", 1, "number of guest displays (1 to 16)")
 	flag.BoolVar(&cfg.fullscreen, "fullscreen", false, "start fullscreen (Immersive)")
 	flag.IntVar(&cfg.memOverrideMiB, "memory", 0, "guest RAM in MiB (default: sized to this PC)")
 	flag.IntVar(&cfg.cpuOverride, "cpus", 0, "guest CPUs (default: sized to this PC)")
@@ -520,9 +523,9 @@ func main() {
 	const qemuExe = "qemu-system-x86_64w.exe"
 	stockQemu := `C:\Program Files\qemu\` + qemuExe
 	_, stockErr := os.Stat(stockQemu)
-	haveStock := stockErr == nil && !cfg.portable
+	haveStock := stockErr == nil && !cfg.portable && guestDisplayCount(cfg.displays) == 1
 	gpuRoot := ""
-	if !cfg.portable {
+	if !cfg.portable && guestDisplayCount(cfg.displays) == 1 {
 		_, err := os.Stat(filepath.Join(cfg.winqEmu, "bin", qemuExe))
 		if err == nil {
 			// A user-managed WINQ-EMU install stays under the user's control. Only
@@ -670,6 +673,7 @@ func main() {
 			conW, conH = p.consoleSize()
 		}
 	}
+	cfg.displayWidth, cfg.displayHeight = conW, conH
 	cmdline += fmt.Sprintf(" video=%dx%d", conW, conH)
 
 	reclaimDir.Store(&cfg.dir)

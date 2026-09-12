@@ -181,34 +181,16 @@ func runWinKeyQmp() {
 func runTitleEnforcer(dir string, fullscreen bool) {
 	hInst, _, _ := procGetModuleHandleW.Call(0)
 	appIcon, _, _ := procLoadIconW.Call(hInst, 1) // the embedded Omarchy .ico
-	lastPid := uint32(0)
-	maximize := false
-	var restore, last *windowPlacement
-	if !fullscreen {
-		restore = rememberedWindow(dir)
-		last = restore
-	}
 	for {
 		if pid := qemuPid.Load(); pid != 0 {
-			if pid != lastPid {
-				lastPid = pid
-				maximize = !fullscreen
-			}
-			enforceTitle(pid, &maximize, appIcon, restore)
-			if hwnd := qemuHwnd.Load(); hwnd != 0 && !fullscreen && !maximize {
-				if now := capturePlacement(hwnd); now != nil && !now.sameAs(last) {
-					now.SavedAt = time.Now()
-					if err := saveWindowPlacement(dir, *now); err == nil {
-						last = now
-					}
-				}
-			}
+			enforceDisplayWindows(pid, dir, fullscreen, appIcon)
 		} else {
-			lastPid = 0
+			enumTitlePid = 0
 			qemuHwnd.Store(0)
 		}
 		time.Sleep(time.Second)
 	}
+
 }
 
 // runCursorReleaseGuard keeps the SDL frontend from confining the Windows

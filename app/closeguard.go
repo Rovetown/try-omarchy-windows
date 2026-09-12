@@ -41,15 +41,15 @@ const (
 // asks for confirmation instead. Runs on the shared hook thread.
 func mouseHookCallback(nCode, wParam, lParam uintptr) uintptr {
 	if int32(nCode) >= 0 && wParam == wmLbuttondown {
-		if hwnd := qemuHwnd.Load(); hwnd != 0 {
-			pt := *(*[2]int32)(unsafe.Pointer(lParam)) // MSLLHOOKSTRUCT.pt
-			packed := uintptr(uint64(uint32(pt[1]))<<32 | uint64(uint32(pt[0])))
-			if under, _, _ := procWindowFromPoint.Call(packed); under == hwnd {
-				lp := uintptr(uint32(pt[0])&0xFFFF | uint32(pt[1])<<16)
-				if ht, _, _ := procSendMessageW.Call(hwnd, wmNchittest, 0, lp); ht == htCloseBtn {
-					requestQuitConfirm()
-					return 1 // swallow the click
-				}
+		pt := *(*[2]int32)(unsafe.Pointer(lParam))
+		packed := uintptr(uint64(uint32(pt[1]))<<32 | uint64(uint32(pt[0])))
+		hwnd, _, _ := procWindowFromPoint.Call(packed)
+		if isQemuDisplayWindow(hwnd, qemuPid.Load()) {
+			lp := uintptr(uint32(pt[0])&0xffff | uint32(pt[1])<<16)
+			if hit, _, _ := procSendMessageW.Call(hwnd, wmNchittest, 0, lp); hit == htCloseBtn {
+				qemuHwnd.Store(hwnd)
+				requestQuitConfirm()
+				return 1
 			}
 		}
 	}
