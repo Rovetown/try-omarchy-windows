@@ -19,6 +19,9 @@ func runCheckpointUI(dir string) error {
 	const listID, nameID, createID, restoreID, deleteID, closeID = 4100, 4101, 4102, 4103, 4104, 4105
 	const operationDone, progressChanged = 0x8020, 0x8021
 	store := checkpointStore{installation: dir}
+	if err := store.Recover(); err != nil {
+		return err
+	}
 	var hwnd, list, name, status, closeButton uintptr
 	var buttons []uintptr
 	var entries []vmCheckpoint

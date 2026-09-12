@@ -156,6 +156,9 @@ func (s checkpointStore) Create(name string, report backupProgress) (vmCheckpoin
 		return entry, err
 	}
 	defer guard.Close()
+	if err := s.cleanupInterrupted(root); err != nil {
+		return entry, err
+	}
 	entries, err := s.List()
 	if err != nil {
 		return entry, err
