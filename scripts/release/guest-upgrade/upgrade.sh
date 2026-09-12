@@ -12,7 +12,7 @@ grep -qx 'upgrade-test-owned-lock' /var/lib/pacman/db.lck
 sudo rm /var/lib/pacman/db.lck
 # Let optional reboot/orphan prompts time out without accepting them.
 GUM_CONFIRM_TIMEOUT=1s omarchy-update -y > /tmp/upgrade-packages.log 2>&1 || { cat /tmp/upgrade-packages.log; exit 1; }
-if grep -q "error: command failed to execute correctly" /tmp/upgrade-packages.log; then cat /tmp/upgrade-packages.log; exit 1; fi
+if grep -q "command failed to execute correctly" /tmp/upgrade-packages.log; then cat /tmp/upgrade-packages.log; exit 1; fi
 [[ $(pacman -Q try-omarchy-runtime) == "try-omarchy-runtime $CANDIDATE_RUNTIME" ]]
 [[ $(cat /usr/share/omarchy/version) == "$CANDIDATE_VERSION" ]]
 sha256sum -c "$HOME/upgrade-preserve.sha256"
