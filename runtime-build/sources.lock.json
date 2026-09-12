@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r3",
+  "name": "winq-emu-alpha10-source-r4",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -17,6 +17,10 @@
       {
         "file": "patches/qemu/0002-restore-bounded-sdl-refresh-intervals.patch",
         "sha256": "61bc4a8e9a18487a4363241d4d949321758ed1b1fae7bb800cbb4f37f494403a"
+      },
+      {
+        "file": "patches/qemu/0003-usb-explicit-attachment-without-reconnect.patch",
+        "sha256": "a4ac97168434f53e52a03df772cf67b6211f89f971901f7d5aea5b4bbb227f68"
       }
     ]
   },

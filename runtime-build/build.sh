@@ -124,6 +124,7 @@ mkdir -p "$qemu_build"
         --enable-opengl \
         --enable-virglrenderer \
         --enable-slirp \
+        --enable-libusb \
         --disable-docs \
         --disable-plugins
 )

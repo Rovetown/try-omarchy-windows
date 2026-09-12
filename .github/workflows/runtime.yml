@@ -35,6 +35,7 @@ jobs:
             mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-libepoxy
             mingw-w64-ucrt-x86_64-libslirp
+            mingw-w64-ucrt-x86_64-libusb
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pixman
@@ -55,6 +56,11 @@ jobs:
           runtime-output/smoke/qemu-system-x86_64.exe --version
           runtime-output/smoke/qemu-system-x86_64.exe -accel help | tr -d '\r' | tee runtime-output/smoke/accelerators.txt
           grep -Fx whpx runtime-output/smoke/accelerators.txt
+          runtime-output/smoke/qemu-system-x86_64.exe -device help 2>&1 | tee runtime-output/smoke/devices.txt
+          grep -F 'name "usb-host"' runtime-output/smoke/devices.txt
+          grep -F 'name "qemu-xhci"' runtime-output/smoke/devices.txt
+          runtime-output/smoke/qemu-system-x86_64.exe -device usb-host,help 2>&1 | tee runtime-output/smoke/usb-properties.txt
+          grep -F 'auto-reconnect' runtime-output/smoke/usb-properties.txt
 
       - name: Verify archives
         shell: pwsh
