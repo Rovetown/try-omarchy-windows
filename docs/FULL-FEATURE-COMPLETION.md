@@ -150,3 +150,28 @@ primary window plus a three-window SDL-class lifecycle fixture, including
 independent identities, saved placements and removal of a closed window.
 Physical GPU, mixed-DPI and monitor hotplug acceptance remains part of the
 integrated Windows round.
+
+### LAN forwarding and snapshot interruption recovery
+
+Add LAN in Settings selects a Windows adapter, protocol and guest service port.
+The saved adapter GUID follows DHCP address changes while preserving a selected
+IP alias when it remains available. Missing adapters and resolved port conflicts
+produce actionable errors. Existing forwards stay on loopback by default.
+
+Firewall rules have a persistent installation identity, apply to the QEMU
+executable and selected ports, and allow the local subnet on private/domain
+networks. Public-network access is an explicit setting. Configuration changes
+and uninstall remove only that installation's rules. Native Windows tests cover
+adapter discovery, rule creation, verification, removal and preservation of
+another installation's rules.
+
+Snapshot recovery now removes recognized interrupted writes and deletions under
+the store lock. It preserves completed snapshots, links and unexpected files.
+The recovery tests pass on Linux and Windows, including refusal to clean a store
+with another operation in progress.
+
+The guest smoke runner now exercises echo traffic over TCP and UDP through both
+loopback and a selected host LAN address. Both runs passed with the v17 guest
+under KVM. This verifies the QEMU forwarding path; native Windows firewall tests
+and the interactive Add LAN dialog also passed. The expanded Settings window
+passed the 500-pixel work-area keyboard and scrolling checks again.

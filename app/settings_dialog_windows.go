@@ -73,6 +73,8 @@ const (
 	settingsSnapshotsID   = 2031
 	settingsPortableID    = 2032
 	settingsDisplaysID    = 2033
+	settingsLANPublicID   = 2034
+	settingsLANAddID      = 2035
 	bsAutoradiobutton     = 0x0009
 	wsGroup               = 0x00020000
 	settingsRecoveryDone  = 0x8010
@@ -128,7 +130,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	var hwnd uintptr
 	var scroll settingsScroll
 	var hFull, hMem, hCPUs, hDisk, hShare, hShareOn, hFwd, hKey uintptr
-	var hRenderAuto, hRenderGPU, hRenderCPU, hDisplays uintptr
+	var hRenderAuto, hRenderGPU, hRenderCPU, hDisplays, hLANPublic uintptr
 
 	text := func(handle uintptr) string {
 		n, _, _ := procSendMessageW.Call(handle, wmGettextlength, 0, 0)
@@ -157,6 +159,14 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		s.Displays, err = strconv.Atoi(strings.TrimSpace(text(hDisplays)))
 		if err != nil || s.Displays < 1 || s.Displays > maximumGuestDisplays {
 			return s, fmt.Errorf("choose 1 to %d guest displays", maximumGuestDisplays)
+		}
+		checkedLAN, _, _ := procSendMessageW.Call(hLANPublic, bmGetcheck, 0, 0)
+		s.LANPublic = checkedLAN == bstChecked
+		s.ForwardAdapters = map[string]string{}
+		for _, forward := range s.Forwards {
+			if adapter := current.ForwardAdapters[forward]; adapter != "" {
+				s.ForwardAdapters[forward] = adapter
+			}
 		}
 		return s, s.validate()
 	}
@@ -246,6 +256,32 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				launchRecovery("move")
 			case settingsMoveCleanupID:
 				launchRecovery("move-cleanup")
+			case settingsLANAddID:
+				value, err := chooseLANForward(hwnd)
+				if err != nil {
+					errorBox(err.Error())
+					break
+				}
+				if value.Forward != "" {
+					lines := append(strings.Fields(text(hFwd)), value.Forward)
+					var forwards forwardList
+					for _, line := range lines {
+						if err = forwards.Set(line); err != nil {
+							break
+						}
+					}
+					if err != nil {
+						errorBox(err.Error())
+					} else {
+						setText(hFwd, strings.Join(lines, "\r\n"))
+						if value.Adapter != "" {
+							if current.ForwardAdapters == nil {
+								current.ForwardAdapters = map[string]string{}
+							}
+							current.ForwardAdapters[value.Forward] = value.Adapter
+						}
+					}
+				}
 			case settingsPortableID:
 				launchRecovery("portable-create")
 			case settingsSnapshotsID:
@@ -303,7 +339,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		return false
 	}
 
-	const clientW, clientH = 480, 748
+	const clientW, clientH = 480, 780
 	rect := [4]int32{0, 0, clientW, clientH}
 	style := uintptr(wsCaption | wsSysmenu | wsVscroll)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rect[0])), style, 0, 0)
@@ -411,10 +447,16 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		procSendMessageW.Call(hShareOn, bmSetcheck, bstChecked, 0)
 	}
 	y += 34
-	mk("STATIC", "Port forwards, one per line\n(tcp:2222:22 forwards\n127.0.0.1:2222 to sshd)", left, y+3, labelW, 60, ssNoprefix, 0)
+	mk("STATIC", "Port forwards\nLocal: tcp:2222:22\nLAN: tcp:IP:8080:80", left, y+3, labelW, 60, ssNoprefix, 0)
 	hFwd = mk("EDIT", strings.Join(current.Forwards, "\r\n"), fieldX, y, fieldW, 72,
 		wsBorder|wsTabstop|wsVscroll|esMultiline|esAutovscroll, settingsFwdID)
 	y += 82
+	mk("BUTTON", "Add LAN...", left, y, 120, 26, wsTabstop, settingsLANAddID)
+	hLANPublic = mk("BUTTON", "Allow LAN on public networks", left+130, y, clientW-2*left-130, 22, bsAutocheckbox|wsTabstop, settingsLANPublicID)
+	if current.LANPublic {
+		procSendMessageW.Call(hLANPublic, bmSetcheck, bstChecked, 0)
+	}
+	y += 32
 	mk("STATIC", "SSH public key file\n(blank: your ~/.ssh/id_*.pub)", left, y+3, labelW, 40, ssNoprefix, 0)
 	hKey = mk("EDIT", current.SSHKey, fieldX, y, fieldW, 24, wsBorder|wsTabstop|esAutohscroll, settingsKeyID)
 	// The two-line key label above is 40 px tall from y+3; start the next

@@ -19,6 +19,7 @@ type config struct {
 	winqEmu, share              string
 	fresh, fullscreen, noGpu    bool
 	hostCursor                  bool
+	lanPublic                   bool
 	instant, portable           bool
 	guestDir, vmDir, disk       string
 	diskFormat                  string
@@ -291,7 +292,7 @@ func TestAudioUnavailableMatchesOnlyDirectSoundStartupFailures(t *testing.T) {
 
 func TestBuildQemuArgsForwardsPortsOnLoopback(t *testing.T) {
 	cfg := &config{vmDir: "/vm", guestDir: "/guest", disk: "/vm/disk.raw", diskFormat: "raw",
-		memMiB: 4096, audio: "none", forwards: []portForward{{"tcp", 2222, 22}}}
+		memMiB: 4096, audio: "none", forwards: []portForward{{"tcp", 2222, 22, ""}}}
 	args := strings.Join(buildQemuArgs(cfg, "root=/dev/vda"), " ")
 	if !strings.Contains(args, "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 ") {
 		t.Fatalf("forward missing from QEMU args: %s", args)

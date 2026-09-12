@@ -34,6 +34,7 @@ type config struct {
 	winqEmu, share              string
 	fresh, fullscreen, noGpu    bool
 	hostCursor                  bool
+	lanPublic                   bool
 	instant, portable           bool
 	guestDir, vmDir, disk       string
 	diskFormat                  string
@@ -148,7 +149,9 @@ func main() {
 	flag.BoolVar(&cfg.instant, "instant", false, "skip first-boot questions and use the trial account")
 	flag.BoolVar(&cfg.portable, "portable", false, "run entirely from data and payload folders beside the executable")
 	var forwards forwardList
-	flag.Var(&forwards, "forward", "forward a Windows loopback port into Omarchy, as tcp:2222:22 or 8080:80 (repeatable)")
+	flag.Var(&forwards, "forward", "forward a Windows port into Omarchy: tcp:2222:22 (local), tcp:192.168.1.5:8080:80 (LAN); repeatable")
+	firewallPlan := flag.String("firewall-plan", "", "internal: apply owned LAN firewall rules")
+	flag.BoolVar(&cfg.lanPublic, "lan-public", false, "allow explicitly selected LAN forwards on public networks")
 	sshPort := flag.Int("ssh", 0, "forward this Windows loopback port to Omarchy's sshd and start sshd for the session")
 	recoveryAction := flag.String("recovery", "", "open backup, restore, snapshots, portable-create, reset, move, or uninstall controls")
 	uninstall := flag.Bool("uninstall", false, "remove this Try Omarchy installation: shortcuts, the Apps & features entry, and the data folder")
@@ -210,6 +213,13 @@ func main() {
 	// code (see setup.go); it must not touch the single-instance port.
 	if *enableWhp {
 		os.Exit(runDismEnable())
+	}
+	if *firewallPlan != "" {
+		if err := applyEncodedLANFirewall(*firewallPlan); err != nil {
+			errorBox(err.Error())
+			os.Exit(1)
+		}
+		return
 	}
 	if *reclaim {
 		os.Exit(sendLifecycleCommand("reclaim"))
@@ -398,6 +408,16 @@ func main() {
 		fatal("%v.", err)
 	}
 	cfg.forwards = forwards
+	if !explicitFlags["forward"] && !explicitFlags["ssh"] && len(userSettings.ForwardAdapters) > 0 {
+		adapters, err := availableLANAdapters()
+		if err != nil {
+			fatal("Could not read network adapters: %v", err)
+		}
+		cfg.forwards, err = resolveForwardAdapters(forwards, userSettings.ForwardAdapters, adapters)
+		if err != nil {
+			fatal("Could not prepare LAN forwarding: %v", err)
+		}
+	}
 	cfg.sshKey = sshKey
 	if sshRequested(cfg.forwards) && cfg.sshKey == "" {
 		logf("ssh requested without a public key - password login only")
@@ -686,6 +706,9 @@ func main() {
 	go runCloseGuard()
 	runClipboardBridge()
 
+	if err := ensureLANFirewall(cfg); err != nil {
+		fatal("Could not prepare LAN forwarding:\n\n%v", err)
+	}
 	cfg.audio = "dsound"
 
 	for relaunch := true; relaunch; {

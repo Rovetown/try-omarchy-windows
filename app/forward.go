@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,9 +11,10 @@ import (
 	"strings"
 )
 
-// Loopback-only port forwarding from Windows into the guest, plus the opt-in
-// SSH preset built on it. Same semantics as the mac app: a forward binds
-// 127.0.0.1 only, the guest service must listen on its network interface,
+// Port forwarding from Windows into the guest, plus the opt-in
+// SSH preset built on it. A forward binds
+// 127.0.0.1 by default; an explicit IPv4 address selects a LAN binding. The guest
+// service must listen on its network interface,
 // and sshd is requested per boot whenever a TCP forward targets guest port
 // 22. The launcher never enables sshd across boots or edits its config; the
 // guest side lives in the factory overlay's try-omarchy-sshd.service.
@@ -20,11 +22,15 @@ type portForward struct {
 	proto     string
 	hostPort  int
 	guestPort int
+	bind      string
 }
 
 const maxPublicKeyBytes = 1024
 
 func (f portForward) String() string {
+	if f.bind != "" {
+		return fmt.Sprintf("%s:%s:%d:%d", f.proto, f.bind, f.hostPort, f.guestPort)
+	}
 	return fmt.Sprintf("%s:%d:%d", f.proto, f.hostPort, f.guestPort)
 }
 
@@ -34,6 +40,14 @@ func parseForward(value string) (portForward, error) {
 	parts := strings.Split(strings.TrimSpace(value), ":")
 	f := portForward{proto: "tcp"}
 	switch len(parts) {
+	case 4:
+		f.proto = strings.ToLower(parts[0])
+		address, err := netip.ParseAddr(parts[1])
+		if err != nil || !address.Is4() || !(address.IsGlobalUnicast() || address.IsLoopback() || address.IsUnspecified() || address.IsLinkLocalUnicast()) {
+			return f, fmt.Errorf("choose a Windows IPv4 address or 0.0.0.0 for LAN forwarding")
+		}
+		f.bind = address.String()
+		parts = parts[2:]
 	case 3:
 		f.proto = strings.ToLower(parts[0])
 		parts = parts[1:]
@@ -88,7 +102,7 @@ func (l *forwardList) add(f portForward) error {
 		return fmt.Errorf("windows TCP port %d is reserved by Try Omarchy; choose a port outside %d-%d", f.hostPort, qmpToolsPort, agentPort)
 	}
 	for _, existing := range *l {
-		if existing.proto == f.proto && existing.hostPort == f.hostPort {
+		if existing.proto == f.proto && existing.hostPort == f.hostPort && (existing.address() == f.address() || existing.address() == "0.0.0.0" || f.address() == "0.0.0.0") {
 			return fmt.Errorf("windows port %d is already forwarded for %s", f.hostPort, f.proto)
 		}
 	}
@@ -97,11 +111,11 @@ func (l *forwardList) add(f portForward) error {
 }
 
 // netdevArg renders the user-mode netdev with every forward bound to the
-// loopback address, so nothing on the LAN can reach the guest.
+// requested address; omitted bindings remain local to the Windows host.
 func netdevArg(forwards []portForward) string {
 	arg := "user,id=n0"
 	for _, f := range forwards {
-		arg += fmt.Sprintf(",hostfwd=%s:127.0.0.1:%d-:%d", f.proto, f.hostPort, f.guestPort)
+		arg += fmt.Sprintf(",hostfwd=%s:%s:%d-:%d", f.proto, f.address(), f.hostPort, f.guestPort)
 	}
 	return arg
 }
@@ -207,4 +221,15 @@ func sshCmdline(forwards []portForward, publicKey string) string {
 		words += " tryomarchy.sshkey=" + base64.StdEncoding.EncodeToString([]byte(publicKey))
 	}
 	return words
+}
+
+func (f portForward) address() string {
+	if f.bind == "" {
+		return "127.0.0.1"
+	}
+	return f.bind
+}
+func (f portForward) exposedToLAN() bool {
+	ip, err := netip.ParseAddr(f.address())
+	return err == nil && !ip.IsLoopback()
 }

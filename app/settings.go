@@ -36,7 +36,9 @@ type settings struct {
 	// older install that has never been offered the recommended exchange folder.
 	SharedFolderPrompted bool `json:"sharedFolderPrompted,omitempty"`
 	// Loopback port forwards in -forward syntax, for example "tcp:2222:22".
-	Forwards []string `json:"forwards"`
+	Forwards        []string          `json:"forwards"`
+	LANPublic       bool              `json:"lanPublic,omitempty"`
+	ForwardAdapters map[string]string `json:"forwardAdapters,omitempty"`
 	// Public key file authorized for the Omarchy account when a forward
 	// targets sshd. Empty picks the usual ~/.ssh/id_*.pub.
 	SSHKey string `json:"sshKey"`
@@ -218,6 +220,9 @@ func applySettings(cfg *config, s settings, explicit map[string]bool, forwards *
 	}
 	if cfg.displays < 1 || cfg.displays > maximumGuestDisplays {
 		return fmt.Errorf("displays must be between 1 and %d", maximumGuestDisplays)
+	}
+	if !explicit["lan-public"] {
+		cfg.lanPublic = s.LANPublic
 	}
 	if !explicit["fullscreen"] {
 		cfg.fullscreen = s.Fullscreen

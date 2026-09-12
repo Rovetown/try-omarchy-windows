@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import ipaddress
+import socket
 import json
 import os
 import re
@@ -92,7 +95,15 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--package-update", action="store_true", help="also exercise pacman against current signed repositories in the disposable snapshot")
     parser.add_argument("--displays", type=int, choices=range(1, 17), help="also boot the graphical desktop and verify this many guest displays")
+    parser.add_argument("--network-address", help="verify TCP and UDP forwarding through this host IPv4 address")
     args = parser.parse_args()
+    network_ports = []
+    if args.network_address:
+        ipaddress.IPv4Address(args.network_address)
+        for kind in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+            with socket.socket(socket.AF_INET, kind) as probe:
+                probe.bind((args.network_address, 0))
+                network_ports.append(probe.getsockname()[1])
     if args.package_update:
         FACT_CHECKS["package-update"] = "sudo pacman -Syu --noconfirm >/tmp/tryomarchy-package-update.log 2>&1 && echo yes || { cat /tmp/tryomarchy-package-update.log >&2; echo no; }"
         EXPECTED_FACTS["package-update"] = "yes"
@@ -144,7 +155,7 @@ def main() -> None:
         "-device",
         "virtio-rng-pci",
         "-netdev",
-        "user,id=net0",
+        "user,id=net0" + (f",hostfwd=tcp:{args.network_address}:{network_ports[0]}-:18080,hostfwd=udp:{args.network_address}:{network_ports[1]}-:18081" if args.network_address else ""),
         "-device",
         "virtio-net-pci,netdev=net0",
     ]
@@ -168,6 +179,7 @@ def main() -> None:
     transcript = bytearray()
     login_attempts = 0
     sent_command = False
+    network_checked = False
     password_sent_at: float | None = None
     password_offset = 0
     last_login_prompt = -1
@@ -188,12 +200,28 @@ def main() -> None:
                 if len(transcript) > 1_000_000:
                     del transcript[:-500_000]
 
+                if args.network_address and not network_checked and b"TRYOMARCHY_NETWORK_READY\r\n" in transcript:
+                    for kind, port in zip((socket.SOCK_STREAM, socket.SOCK_DGRAM), network_ports):
+                        with socket.socket(socket.AF_INET, kind) as client:
+                            client.settimeout(10)
+                            client.connect((args.network_address, port))
+                            payload = b"try-omarchy-forward-" + os.urandom(16)
+                            client.sendall(payload)
+                            if client.recv(4096) != payload:
+                                raise RuntimeError("forwarded service returned different data")
+                    network_checked = True
+                    process.stdin.write(b"network-complete\n")
+                    process.stdin.flush()
+                    print("ok - guest TCP and UDP forwarding through " + args.network_address)
+
                 if SUCCESS in transcript:
                     process.wait(timeout=90)
                     facts = parse_facts(bytes(transcript))
                     wrong = {name: (facts.get(name), want) for name, want in EXPECTED_FACTS.items() if facts.get(name) != want}
                     if wrong:
                         raise SystemExit(f"instant guest booted but the image facts are wrong: {wrong}")
+                    if args.network_address and not network_checked:
+                        raise SystemExit("network forwarding was not exercised")
                     print("ok - instant guest reached a usable trial account")
                     print("ok - image facts: " + ", ".join(f"{k}={facts[k]}" for k in sorted(facts)))
                     return
@@ -224,6 +252,32 @@ def main() -> None:
                 checks = "; ".join(
                     f"printf 'TRYOMARCHY_FACT:{name}:%s\\n' \"$({command})\"" for name, command in FACT_CHECKS.items()
                 )
+                if args.network_address:
+                    server = """import socket, threading, time
+ready = []
+def echo(kind, port):
+    s = socket.socket(socket.AF_INET, kind)
+    s.bind(('0.0.0.0', port))
+    if kind == socket.SOCK_STREAM:
+        s.listen(1)
+    ready.append(port)
+    if kind == socket.SOCK_STREAM:
+        c, _ = s.accept()
+        with c:
+            c.sendall(c.recv(4096))
+    else:
+        data, peer = s.recvfrom(4096)
+        s.sendto(data, peer)
+    s.close()
+for kind, port in ((socket.SOCK_STREAM, 18080), (socket.SOCK_DGRAM, 18081)):
+    threading.Thread(target=echo, args=(kind, port), daemon=True).start()
+while len(ready) != 2:
+    time.sleep(.05)
+print('TRYOMARCHY_NETWORK_READY', flush=True)
+time.sleep(60)
+"""
+                    encoded = base64.b64encode(server.encode()).decode()
+                    checks = f"printf %s {encoded} | base64 -d >/tmp/network-smoke.py; python /tmp/network-smoke.py & read -r network_result; " + checks
                 process.stdin.write(
                     (checks + "; ").encode()
                     + b"printf 'TRYOMARCHY_SMOKE:%s:%s\\n' \"$(id -un)\" "

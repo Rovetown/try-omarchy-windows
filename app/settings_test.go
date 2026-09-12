@@ -74,7 +74,7 @@ func TestApplySettingsLetsExplicitFlagsWin(t *testing.T) {
 
 	// Explicit flags keep their values; an explicit -ssh replaces the list.
 	cfg = &config{fullscreen: false, memOverrideMiB: 0, share: ""}
-	forwards = forwardList{{"tcp", 2299, 22}}
+	forwards = forwardList{{"tcp", 2299, 22, ""}}
 	keyPath = ""
 	explicit := map[string]bool{"fullscreen": true, "memory": true, "share": true, "ssh": true, "ssh-key": true}
 	if err := applySettings(cfg, file, explicit, &forwards, &keyPath); err != nil {
