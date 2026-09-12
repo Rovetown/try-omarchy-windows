@@ -8,14 +8,18 @@ and acceptance evidence. The signed **v0.0.17-preview** is the regression
 baseline; it predates the active snapshot rollback, portable lifecycle,
 multi-display, LAN, USB and saved-session work on that branch.
 
-The latest source-built runtime is recipe r5 from
-[build 34721269877](https://github.com/omacom/try-omarchy-windows/actions/runs/34721269877).
+The latest source-built runtime is recipe r6 from
+[build 34724701163](https://github.com/omacom/try-omarchy-windows/actions/runs/34724701163).
 Its USB and RAM restore smokes passed, and the archives were verified against
 the pinned source recipe. In the nested lab it is extracted to
-`D:\TryOmarchyFullFeaturesTest\runtime-r5`. The runtime archive SHA256 is
-`618525d054aa2407d042c1a2a45a4ec8a9d95802259d77f62fdbd1110f3888e4`.
+`D:\TryOmarchyFullFeaturesTest\runtime-r6`. The runtime archive SHA256 is
+`725588202dbfd6510570775d10df1edcf379641df769cf72a3cfb5e29f3423fc`.
 Keep it separate from signed release payloads. A final integrated signed candidate will be prepared after feature
 implementation and regression checks.
+
+The correctness review and final 330-test Windows run are recorded in
+[PR-110-REVIEW.md](PR-110-REVIEW.md). The opt-in firewall lifecycle test passed
+separately.
 
 Guest source now includes the streaming helper at compatibility revision 19.
 When rerunning smoke checks against the signed v17 baseline, pass

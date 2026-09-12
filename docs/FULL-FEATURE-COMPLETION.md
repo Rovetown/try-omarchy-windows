@@ -356,8 +356,10 @@ fixed three boundary cases: active transfers losing their status after the
 idle ticket timeout, a saved-memory size limit being mistaken for stream EOF,
 and 16-byte USB identity buffers rejecting valid deeper hub paths. Runtime r6
 expands all four USB port buffers; the formatter test now checks caller sizes
-as well as truncation behavior. Runtime r5 remains the previously tested baseline
-until the r6 build and runtime tests finish.
+as well as truncation behavior. Runtime r6 passed its build, USB/RAM smokes,
+archive verification and the 330-test interactive Windows suite. The native
+firewall lifecycle test passed separately. Exact artifacts and the complete
+review record are in [PR-110-REVIEW.md](PR-110-REVIEW.md).
 
 The same review found two recovery integration gaps. Retained portable copies
 now carry authenticated manifests and launch with their original guest/runtime
