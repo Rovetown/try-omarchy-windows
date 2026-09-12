@@ -5,6 +5,9 @@ still needs the checks below; the open work is tracked in one place, GitHub
 issue #77. A passing build does not establish hardware or
 upgrade reliability.
 
+The [v0.0.15 candidate report](PREVIEW-15-VALIDATION.md) records the signed
+Windows VM checks and the remaining physical acceptance.
+
 ## Current guest completion work
 
 - [x] Complete the Omarchy 4.0.3 software candidate, including personalized setup,
