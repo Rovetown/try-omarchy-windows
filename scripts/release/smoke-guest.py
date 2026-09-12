@@ -41,7 +41,7 @@ FACT_CHECKS = {
     "sshd": "systemctl is-active sshd 2>/dev/null || true",
     "omarchy-repo-signed": "grep -A2 '^\\[omarchy\\]' /etc/pacman.conf | grep -q TrustAll && echo no || echo yes",
     "input-group": "id -nG | tr ' ' '\\n' | grep -qx input && echo yes || echo no",
-    "compat-version": "test \"$(cat /usr/share/try-omarchy/compat-version)\" = \"18:$(uname -r)\" && echo yes || echo no",
+    "compat-version": "test \"$(cat /usr/share/try-omarchy/compat-version)\" = \"19:$(uname -r)\" && echo yes || echo no",
     "kernel-modules": "test -f /usr/lib/modules/$(uname -r)/modules.dep.bin && echo yes || echo no",
     "ready-service": "systemctl is-enabled try-omarchy-ready.service 2>/dev/null || true",
 }
@@ -98,7 +98,15 @@ def main() -> None:
     parser.add_argument("--network-address", help="verify TCP and UDP forwarding through this host IPv4 address")
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm", help="use TCG for nested Windows runtime testing")
     parser.add_argument("--login-delay", type=float, help="wait for provisioning before the first serial login; TCG defaults to 60 seconds")
+    parser.add_argument("--compat-revision", type=int, default=19, help="expected guest compatibility revision; use 18 for the signed v17 baseline")
     args = parser.parse_args()
+    if not 1 <= args.compat_revision <= 999999:
+        parser.error("compatibility revision is invalid")
+    FACT_CHECKS["compat-version"] = f'test "$(cat /usr/share/try-omarchy/compat-version)" = "{args.compat_revision}:$(uname -r)" && echo yes || echo no'
+    if args.compat_revision >= 19:
+        FACT_CHECKS["file-transfer"] = "file-transfer --help >/dev/null 2>&1 && echo present || echo missing"
+        EXPECTED_FACTS["file-transfer"] = "present"
+
     login_delay = args.login_delay if args.login_delay is not None else (60 if args.accel == "tcg" else 0)
     if login_delay < 0:
         parser.error("login delay must not be negative")

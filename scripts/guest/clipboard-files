@@ -5,6 +5,8 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
+import struct
+import time
 import subprocess
 import sys
 import tempfile
@@ -34,15 +36,19 @@ def inspect(data):
     if not data or len(data) > ARCHIVE_LIMIT:
         raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
     archive = zipfile.ZipFile(io.BytesIO(data))
+    return inspect_archive(archive)
+
+
+def inspect_archive(archive, file_limit=FILE_LIMIT, entry_limit=ENTRY_LIMIT):
     entries = archive.infolist()
-    if not 0 < len(entries) <= ENTRY_LIMIT:
+    if not 0 < len(entries) <= entry_limit:
         raise ValueError('Too many clipboard entries')
     seen = {}
     spelling = {}
     total = 0
     for entry in entries:
         mode = entry.external_attr >> 16
-        if not valid_name(entry.filename) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)) or entry.flag_bits & 1:
+        if not valid_name(entry.filename) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)) or entry.flag_bits & 1 or (entry.is_dir() and entry.file_size):
             raise ValueError('Unsupported clipboard name or type')
         name = entry.filename.rstrip('/')
         for prefix in (PurePosixPath(name), *PurePosixPath(name).parents):
@@ -57,7 +63,7 @@ def inspect(data):
             raise ValueError('Duplicate clipboard name')
         seen[key] = entry.is_dir()
         total += entry.file_size
-        if total > FILE_LIMIT:
+        if total > file_limit:
             raise ValueError('Clipboard files exceed 64 MiB')
     for name in seen:
         for parent in PurePosixPath(name).parents:
@@ -73,7 +79,7 @@ class BoundedBuffer(io.BytesIO):
         return super().write(data)
 
 
-def uri_paths(data):
+def uri_paths(data, entry_limit=ENTRY_LIMIT):
     lines = data.decode('utf-8', errors='strict').splitlines()
     if lines and lines[0] in ('copy', 'cut'):
         lines = lines[1:]  # A cut is always a copy across the bridge.
@@ -88,20 +94,27 @@ def uri_paths(data):
         if not name.startswith('/') or '\x00' in name:
             raise ValueError('Invalid file URI')
         paths.append(Path(name))
-    if not 0 < len(paths) <= ENTRY_LIMIT:
+    if not 0 < len(paths) <= entry_limit:
         raise ValueError('Clipboard selection is empty or too large')
     return paths
 
 
 def pack(data):
     output = BoundedBuffer()
+    pack_to(data, output)
+    result = output.getvalue()
+    inspect(result)
+    return result
+
+
+def pack_to(data, output, file_limit=FILE_LIMIT, entry_limit=ENTRY_LIMIT, preserve_metadata=False):
     total = 0
     count = 0
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         def add(parent_fd, filename, name):
             nonlocal total, count
             count += 1
-            if count > ENTRY_LIMIT or not valid_name(name):
+            if count > entry_limit or not valid_name(name):
                 raise ValueError('Too many entries or unsupported file name')
             info = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
             if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
@@ -116,30 +129,37 @@ def pack(data):
                     raise ValueError('Clipboard source changed')
                 entry = zipfile.ZipInfo(name + ('/' if stat.S_ISDIR(info.st_mode) else ''))
                 entry.create_system = 3
-                entry.external_attr = ((stat.S_IFDIR | 0o700) if stat.S_ISDIR(info.st_mode) else (stat.S_IFREG | 0o600)) << 16
+                mode = stat.S_IFREG | 0o600
+                if preserve_metadata:
+                    timestamp = max(0, min(int(info.st_mtime), 0xffffffff))
+                    entry.date_time = time.gmtime(max(timestamp, 315532800))[:6]
+                    entry.extra = struct.pack('<HHBI', 0x5455, 5, 1, timestamp)
+                    mode |= actual.st_mode & 0o100
+                entry.external_attr = ((stat.S_IFDIR | 0o700) if stat.S_ISDIR(info.st_mode) else mode) << 16
                 entry.compress_type = zipfile.ZIP_DEFLATED
                 if stat.S_ISDIR(info.st_mode):
                     archive.writestr(entry, b'')
                     for child in sorted(os.listdir(fd)):
                         add(fd, child, name + '/' + child)
                 else:
-                    with archive.open(entry, 'w') as dest:
-                        while chunk := os.read(fd, min(65536, FILE_LIMIT - total + 1)):
+                    initial_total = total
+                    with archive.open(entry, 'w', force_zip64=file_limit > (2 << 30)) as dest:
+                        while chunk := os.read(fd, min(65536, file_limit - total + 1)):
                             total += len(chunk)
-                            if total > FILE_LIMIT:
+                            if total > file_limit:
                                 raise ValueError('Clipboard files exceed 64 MiB')
                             dest.write(chunk)
+                    after = os.fstat(fd)
+                    if total - initial_total != actual.st_size or after.st_size != actual.st_size or after.st_mtime_ns != actual.st_mtime_ns:
+                        raise ValueError('Source file changed during transfer')
             finally:
                 os.close(fd)
-        for source in uri_paths(data):
+        for source in uri_paths(data, entry_limit):
             parent_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 add(parent_fd, source.name, source.name)
             finally:
                 os.close(parent_fd)
-    result = output.getvalue()
-    inspect(result)
-    return result
 
 
 def unpack(data, cache):

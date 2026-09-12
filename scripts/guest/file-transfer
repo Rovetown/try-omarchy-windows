@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Stream verified file selections for clipboard and drag-and-drop adapters."""
+import argparse
+import ctypes
+import datetime
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import struct
+import sys
+import tempfile
+import zipfile
+import zlib
+
+loader = importlib.machinery.SourceFileLoader('clipboard_files', str(Path(__file__).with_name('clipboard-files')))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+files = importlib.util.module_from_spec(spec)
+loader.exec_module(files)
+LIMIT = 100 << 30
+ENTRIES = 10000
+RESERVE = 1 << 30
+
+
+def plain_path(path):
+    if not path.is_absolute():
+        raise ValueError('An absolute path is required')
+    for candidate in (path, *path.parents):
+        if candidate.is_symlink():
+            raise ValueError('Linked transfer paths are not supported')
+
+
+class BudgetFile:
+    def __init__(self, file, limit):
+        self.file, self.limit = file, limit
+
+    def write(self, data):
+        if self.file.tell() + len(data) > self.limit:
+            raise ValueError('Transfer exceeds its storage budget')
+        return self.file.write(data)
+
+    def __getattr__(self, name):
+        return getattr(self.file, name)
+
+
+def inspect(file):
+    return files.inspect_archive(zipfile.ZipFile(file), LIMIT, ENTRIES)
+
+
+def offer_for(file):
+    file.seek(0)
+    with inspect(file) as archive:
+        entries = archive.infolist()
+        count, size = len(entries), sum(entry.file_size for entry in entries)
+    file.seek(0)
+    digest = hashlib.file_digest(file, 'sha256').hexdigest()
+    return {'version': 1, 'archiveBytes': os.fstat(file.fileno()).st_size,
+            'fileBytes': size, 'entries': count, 'sha256': digest}
+
+
+def pack(paths, destination):
+    plain_path(destination)
+    for source in paths:
+        plain_path(source)
+        if destination.is_relative_to(source):
+            raise ValueError('Transfer storage must be outside the selected folders')
+    free = shutil.disk_usage(destination.parent).free
+    if free <= RESERVE:
+        raise ValueError('Not enough free space for this transfer')
+    fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    try:
+        with os.fdopen(fd, 'w+b') as output:
+            uris = ''.join(path.as_uri() + '\n' for path in paths).encode()
+            files.pack_to(uris, BudgetFile(output, min(LIMIT, free - RESERVE)), LIMIT, ENTRIES, preserve_metadata=True)
+            output.flush()
+            os.fsync(output.fileno())
+            return offer_for(output)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def valid_offer(offer):
+    names = {'version', 'archiveBytes', 'fileBytes', 'entries', 'sha256'}
+    if not isinstance(offer, dict) or set(offer) != names:
+        return False
+    if any(type(offer[name]) is not int for name in names - {'sha256'}):
+        return False
+    digest = offer['sha256']
+    return (offer['version'] == 1 and 0 < offer['archiveBytes'] <= LIMIT
+            and 0 <= offer['fileBytes'] <= LIMIT and 0 < offer['entries'] <= ENTRIES
+            and isinstance(digest, str) and len(digest) == 64
+            and all(char in '0123456789abcdef' for char in digest))
+
+
+def modified_time(entry):
+    extra = entry.extra
+    while len(extra) >= 4:
+        kind, length = struct.unpack('<HH', extra[:4])
+        value, extra = extra[4:4 + length], extra[4 + length:]
+        if kind == 0x5455 and len(value) >= 5 and value[0] & 1:
+            return struct.unpack('<I', value[1:5])[0]
+    return datetime.datetime(*entry.date_time, tzinfo=datetime.timezone.utc).timestamp()
+
+
+def publish(source, destination):
+    for root, _, _ in os.walk(source, topdown=False):
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = libc.renameat2
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(destination))
+    fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def receive(input, offer, destination):
+    if not valid_offer(offer):
+        raise ValueError('Invalid file transfer offer')
+    plain_path(destination)
+    if destination.exists():
+        raise ValueError('Choose a new destination folder')
+    if shutil.disk_usage(destination.parent).free < offer['archiveBytes'] + offer['fileBytes'] + RESERVE:
+        raise ValueError('Not enough free space for this transfer')
+    with tempfile.TemporaryDirectory(prefix='.transfer-in-', dir=destination.parent) as temporary:
+        stage = Path(temporary)
+        with (stage / 'incoming.zip').open('x+b') as output:
+            digest = hashlib.sha256()
+            remaining = offer['archiveBytes']
+            while remaining:
+                data = input.read(min(65536, remaining))
+                if not data:
+                    raise ValueError('Transfer ended before all files arrived')
+                remaining -= len(data)
+                output.write(data)
+                digest.update(data)
+            if input.read(1) or digest.hexdigest() != offer['sha256']:
+                raise ValueError('File transfer checksum or length mismatch')
+            output.flush()
+            with inspect(output) as archive:
+                entries = archive.infolist()
+                if len(entries) != offer['entries'] or sum(e.file_size for e in entries) != offer['fileBytes']:
+                    raise ValueError('File transfer inventory changed')
+                contents = stage / 'contents'
+                contents.mkdir(mode=0o700)
+                for entry in entries:
+                    target = contents / entry.filename
+                    if entry.is_dir():
+                        target.mkdir(mode=0o700, parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    mode = 0o600 | ((entry.external_attr >> 16) & 0o100)
+                    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
+                    with os.fdopen(fd, 'wb') as result, archive.open(entry) as data:
+                        remaining = entry.file_size
+                        while chunk := data.read(min(65536, remaining + 1)):
+                            remaining -= len(chunk)
+                            if remaining < 0:
+                                raise ValueError('File size changed during transfer')
+                            result.write(chunk)
+                        if remaining:
+                            raise ValueError('File is truncated')
+                        result.flush()
+                        os.fsync(result.fileno())
+                for entry in reversed(entries):
+                    stamp = modified_time(entry)
+                    os.utime(contents / entry.filename, (stamp, stamp), follow_symlinks=False)
+                roots = sorted({entry.filename.split('/')[0] for entry in entries})
+                publish(contents, destination)
+                return {'paths': [str(destination / name) for name in roots]}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='command', required=True)
+    sender = sub.add_parser('pack')
+    sender.add_argument('--archive', required=True, type=Path)
+    sender.add_argument('paths', nargs='+', type=Path)
+    receiver = sub.add_parser('receive')
+    receiver.add_argument('--offer', required=True, type=Path)
+    receiver.add_argument('--destination', required=True, type=Path)
+    args = parser.parse_args()
+    if args.command == 'pack':
+        result = pack(args.paths, args.archive)
+    else:
+        with args.offer.open('rb') as metadata:
+            data = metadata.read(4097)
+        if len(data) > 4096:
+            raise ValueError('Transfer offer is too large')
+        result = receive(sys.stdin.buffer, json.loads(data), args.destination)
+    print(json.dumps(result))
+
+
+def interrupt(*_):
+    raise KeyboardInterrupt()
+
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, interrupt)
+    try:
+        main()
+    except (ValueError, OSError, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
+        print(f'File transfer: {error or "cancelled"}', file=sys.stderr)
+        sys.exit(1)

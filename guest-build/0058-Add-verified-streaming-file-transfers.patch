@@ -1,0 +1,495 @@
+From 85cde37631d0fd382930a31928e1d6ad016d1edf Mon Sep 17 00:00:00 2001
+From: btsouth <btsouth@users.noreply.github.com>
+Date: Sat, 12 Sep 2026 18:37:35 -0400
+Subject: [PATCH] Add verified streaming file transfers to the guest
+ compatibility overlay
+
+---
+ .../usr/local/bin/clipboard-files             |  48 ++--
+ .../usr/local/bin/file-transfer               | 218 ++++++++++++++++++
+ guest/scripts/finalize-rootfs.sh              |   3 +-
+ guest/tests/test_file_transfer.py             |  83 +++++++
+ guest/tests/verify.py                         |   2 +-
+ 5 files changed, 338 insertions(+), 16 deletions(-)
+ create mode 100755 guest/factory-overlay/usr/local/bin/file-transfer
+ create mode 100644 guest/tests/test_file_transfer.py
+
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-files b/guest/factory-overlay/usr/local/bin/clipboard-files
+index 8f36c1d..cfa5df0 100755
+--- a/guest/factory-overlay/usr/local/bin/clipboard-files
++++ b/guest/factory-overlay/usr/local/bin/clipboard-files
+@@ -5,6 +5,8 @@ import os
+ from pathlib import Path, PurePosixPath
+ import shutil
+ import stat
++import struct
++import time
+ import subprocess
+ import sys
+ import tempfile
+@@ -34,15 +36,19 @@ def inspect(data):
+     if not data or len(data) > ARCHIVE_LIMIT:
+         raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
+     archive = zipfile.ZipFile(io.BytesIO(data))
++    return inspect_archive(archive)
++
++
++def inspect_archive(archive, file_limit=FILE_LIMIT, entry_limit=ENTRY_LIMIT):
+     entries = archive.infolist()
+-    if not 0 < len(entries) <= ENTRY_LIMIT:
++    if not 0 < len(entries) <= entry_limit:
+         raise ValueError('Too many clipboard entries')
+     seen = {}
+     spelling = {}
+     total = 0
+     for entry in entries:
+         mode = entry.external_attr >> 16
+-        if not valid_name(entry.filename) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)) or entry.flag_bits & 1:
++        if not valid_name(entry.filename) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)) or entry.flag_bits & 1 or (entry.is_dir() and entry.file_size):
+             raise ValueError('Unsupported clipboard name or type')
+         name = entry.filename.rstrip('/')
+         for prefix in (PurePosixPath(name), *PurePosixPath(name).parents):
+@@ -57,7 +63,7 @@ def inspect(data):
+             raise ValueError('Duplicate clipboard name')
+         seen[key] = entry.is_dir()
+         total += entry.file_size
+-        if total > FILE_LIMIT:
++        if total > file_limit:
+             raise ValueError('Clipboard files exceed 64 MiB')
+     for name in seen:
+         for parent in PurePosixPath(name).parents:
+@@ -73,7 +79,7 @@ class BoundedBuffer(io.BytesIO):
+         return super().write(data)
+ 
+ 
+-def uri_paths(data):
++def uri_paths(data, entry_limit=ENTRY_LIMIT):
+     lines = data.decode('utf-8', errors='strict').splitlines()
+     if lines and lines[0] in ('copy', 'cut'):
+         lines = lines[1:]  # A cut is always a copy across the bridge.
+@@ -88,20 +94,27 @@ def uri_paths(data):
+         if not name.startswith('/') or '\x00' in name:
+             raise ValueError('Invalid file URI')
+         paths.append(Path(name))
+-    if not 0 < len(paths) <= ENTRY_LIMIT:
++    if not 0 < len(paths) <= entry_limit:
+         raise ValueError('Clipboard selection is empty or too large')
+     return paths
+ 
+ 
+ def pack(data):
+     output = BoundedBuffer()
++    pack_to(data, output)
++    result = output.getvalue()
++    inspect(result)
++    return result
++
++
++def pack_to(data, output, file_limit=FILE_LIMIT, entry_limit=ENTRY_LIMIT, preserve_metadata=False):
+     total = 0
+     count = 0
+     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+         def add(parent_fd, filename, name):
+             nonlocal total, count
+             count += 1
+-            if count > ENTRY_LIMIT or not valid_name(name):
++            if count > entry_limit or not valid_name(name):
+                 raise ValueError('Too many entries or unsupported file name')
+             info = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+             if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+@@ -116,30 +129,37 @@ def pack(data):
+                     raise ValueError('Clipboard source changed')
+                 entry = zipfile.ZipInfo(name + ('/' if stat.S_ISDIR(info.st_mode) else ''))
+                 entry.create_system = 3
+-                entry.external_attr = ((stat.S_IFDIR | 0o700) if stat.S_ISDIR(info.st_mode) else (stat.S_IFREG | 0o600)) << 16
++                mode = stat.S_IFREG | 0o600
++                if preserve_metadata:
++                    timestamp = max(0, min(int(info.st_mtime), 0xffffffff))
++                    entry.date_time = time.gmtime(max(timestamp, 315532800))[:6]
++                    entry.extra = struct.pack('<HHBI', 0x5455, 5, 1, timestamp)
++                    mode |= actual.st_mode & 0o100
++                entry.external_attr = ((stat.S_IFDIR | 0o700) if stat.S_ISDIR(info.st_mode) else mode) << 16
+                 entry.compress_type = zipfile.ZIP_DEFLATED
+                 if stat.S_ISDIR(info.st_mode):
+                     archive.writestr(entry, b'')
+                     for child in sorted(os.listdir(fd)):
+                         add(fd, child, name + '/' + child)
+                 else:
+-                    with archive.open(entry, 'w') as dest:
+-                        while chunk := os.read(fd, min(65536, FILE_LIMIT - total + 1)):
++                    initial_total = total
++                    with archive.open(entry, 'w', force_zip64=file_limit > (2 << 30)) as dest:
++                        while chunk := os.read(fd, min(65536, file_limit - total + 1)):
+                             total += len(chunk)
+-                            if total > FILE_LIMIT:
++                            if total > file_limit:
+                                 raise ValueError('Clipboard files exceed 64 MiB')
+                             dest.write(chunk)
++                    after = os.fstat(fd)
++                    if total - initial_total != actual.st_size or after.st_size != actual.st_size or after.st_mtime_ns != actual.st_mtime_ns:
++                        raise ValueError('Source file changed during transfer')
+             finally:
+                 os.close(fd)
+-        for source in uri_paths(data):
++        for source in uri_paths(data, entry_limit):
+             parent_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY)
+             try:
+                 add(parent_fd, source.name, source.name)
+             finally:
+                 os.close(parent_fd)
+-    result = output.getvalue()
+-    inspect(result)
+-    return result
+ 
+ 
+ def unpack(data, cache):
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer b/guest/factory-overlay/usr/local/bin/file-transfer
+new file mode 100755
+index 0000000..99a1416
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/bin/file-transfer
+@@ -0,0 +1,218 @@
++#!/usr/bin/env python3
++"""Stream verified file selections for clipboard and drag-and-drop adapters."""
++import argparse
++import ctypes
++import datetime
++import hashlib
++import importlib.machinery
++import importlib.util
++import json
++import os
++from pathlib import Path
++import shutil
++import signal
++import struct
++import sys
++import tempfile
++import zipfile
++import zlib
++
++loader = importlib.machinery.SourceFileLoader('clipboard_files', str(Path(__file__).with_name('clipboard-files')))
++spec = importlib.util.spec_from_loader(loader.name, loader)
++files = importlib.util.module_from_spec(spec)
++loader.exec_module(files)
++LIMIT = 100 << 30
++ENTRIES = 10000
++RESERVE = 1 << 30
++
++
++def plain_path(path):
++    if not path.is_absolute():
++        raise ValueError('An absolute path is required')
++    for candidate in (path, *path.parents):
++        if candidate.is_symlink():
++            raise ValueError('Linked transfer paths are not supported')
++
++
++class BudgetFile:
++    def __init__(self, file, limit):
++        self.file, self.limit = file, limit
++
++    def write(self, data):
++        if self.file.tell() + len(data) > self.limit:
++            raise ValueError('Transfer exceeds its storage budget')
++        return self.file.write(data)
++
++    def __getattr__(self, name):
++        return getattr(self.file, name)
++
++
++def inspect(file):
++    return files.inspect_archive(zipfile.ZipFile(file), LIMIT, ENTRIES)
++
++
++def offer_for(file):
++    file.seek(0)
++    with inspect(file) as archive:
++        entries = archive.infolist()
++        count, size = len(entries), sum(entry.file_size for entry in entries)
++    file.seek(0)
++    digest = hashlib.file_digest(file, 'sha256').hexdigest()
++    return {'version': 1, 'archiveBytes': os.fstat(file.fileno()).st_size,
++            'fileBytes': size, 'entries': count, 'sha256': digest}
++
++
++def pack(paths, destination):
++    plain_path(destination)
++    for source in paths:
++        plain_path(source)
++        if destination.is_relative_to(source):
++            raise ValueError('Transfer storage must be outside the selected folders')
++    free = shutil.disk_usage(destination.parent).free
++    if free <= RESERVE:
++        raise ValueError('Not enough free space for this transfer')
++    fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
++    try:
++        with os.fdopen(fd, 'w+b') as output:
++            uris = ''.join(path.as_uri() + '\n' for path in paths).encode()
++            files.pack_to(uris, BudgetFile(output, min(LIMIT, free - RESERVE)), LIMIT, ENTRIES, preserve_metadata=True)
++            output.flush()
++            os.fsync(output.fileno())
++            return offer_for(output)
++    except BaseException:
++        destination.unlink(missing_ok=True)
++        raise
++
++
++def valid_offer(offer):
++    names = {'version', 'archiveBytes', 'fileBytes', 'entries', 'sha256'}
++    if not isinstance(offer, dict) or set(offer) != names:
++        return False
++    if any(type(offer[name]) is not int for name in names - {'sha256'}):
++        return False
++    digest = offer['sha256']
++    return (offer['version'] == 1 and 0 < offer['archiveBytes'] <= LIMIT
++            and 0 <= offer['fileBytes'] <= LIMIT and 0 < offer['entries'] <= ENTRIES
++            and isinstance(digest, str) and len(digest) == 64
++            and all(char in '0123456789abcdef' for char in digest))
++
++
++def modified_time(entry):
++    extra = entry.extra
++    while len(extra) >= 4:
++        kind, length = struct.unpack('<HH', extra[:4])
++        value, extra = extra[4:4 + length], extra[4 + length:]
++        if kind == 0x5455 and len(value) >= 5 and value[0] & 1:
++            return struct.unpack('<I', value[1:5])[0]
++    return datetime.datetime(*entry.date_time, tzinfo=datetime.timezone.utc).timestamp()
++
++
++def publish(source, destination):
++    for root, _, _ in os.walk(source, topdown=False):
++        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
++        try:
++            os.fsync(fd)
++        finally:
++            os.close(fd)
++    libc = ctypes.CDLL(None, use_errno=True)
++    rename = libc.renameat2
++    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
++    rename.restype = ctypes.c_int
++    if rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
++        error = ctypes.get_errno()
++        raise OSError(error, os.strerror(error), str(destination))
++    fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
++    try:
++        os.fsync(fd)
++    finally:
++        os.close(fd)
++
++
++def receive(input, offer, destination):
++    if not valid_offer(offer):
++        raise ValueError('Invalid file transfer offer')
++    plain_path(destination)
++    if destination.exists():
++        raise ValueError('Choose a new destination folder')
++    if shutil.disk_usage(destination.parent).free < offer['archiveBytes'] + offer['fileBytes'] + RESERVE:
++        raise ValueError('Not enough free space for this transfer')
++    with tempfile.TemporaryDirectory(prefix='.transfer-in-', dir=destination.parent) as temporary:
++        stage = Path(temporary)
++        with (stage / 'incoming.zip').open('x+b') as output:
++            digest = hashlib.sha256()
++            remaining = offer['archiveBytes']
++            while remaining:
++                data = input.read(min(65536, remaining))
++                if not data:
++                    raise ValueError('Transfer ended before all files arrived')
++                remaining -= len(data)
++                output.write(data)
++                digest.update(data)
++            if input.read(1) or digest.hexdigest() != offer['sha256']:
++                raise ValueError('File transfer checksum or length mismatch')
++            output.flush()
++            with inspect(output) as archive:
++                entries = archive.infolist()
++                if len(entries) != offer['entries'] or sum(e.file_size for e in entries) != offer['fileBytes']:
++                    raise ValueError('File transfer inventory changed')
++                contents = stage / 'contents'
++                contents.mkdir(mode=0o700)
++                for entry in entries:
++                    target = contents / entry.filename
++                    if entry.is_dir():
++                        target.mkdir(mode=0o700, parents=True, exist_ok=True)
++                        continue
++                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
++                    mode = 0o600 | ((entry.external_attr >> 16) & 0o100)
++                    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
++                    with os.fdopen(fd, 'wb') as result, archive.open(entry) as data:
++                        remaining = entry.file_size
++                        while chunk := data.read(min(65536, remaining + 1)):
++                            remaining -= len(chunk)
++                            if remaining < 0:
++                                raise ValueError('File size changed during transfer')
++                            result.write(chunk)
++                        if remaining:
++                            raise ValueError('File is truncated')
++                        result.flush()
++                        os.fsync(result.fileno())
++                for entry in reversed(entries):
++                    stamp = modified_time(entry)
++                    os.utime(contents / entry.filename, (stamp, stamp), follow_symlinks=False)
++                roots = sorted({entry.filename.split('/')[0] for entry in entries})
++                publish(contents, destination)
++                return {'paths': [str(destination / name) for name in roots]}
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    sub = parser.add_subparsers(dest='command', required=True)
++    sender = sub.add_parser('pack')
++    sender.add_argument('--archive', required=True, type=Path)
++    sender.add_argument('paths', nargs='+', type=Path)
++    receiver = sub.add_parser('receive')
++    receiver.add_argument('--offer', required=True, type=Path)
++    receiver.add_argument('--destination', required=True, type=Path)
++    args = parser.parse_args()
++    if args.command == 'pack':
++        result = pack(args.paths, args.archive)
++    else:
++        with args.offer.open('rb') as metadata:
++            data = metadata.read(4097)
++        if len(data) > 4096:
++            raise ValueError('Transfer offer is too large')
++        result = receive(sys.stdin.buffer, json.loads(data), args.destination)
++    print(json.dumps(result))
++
++
++def interrupt(*_):
++    raise KeyboardInterrupt()
++
++
++if __name__ == '__main__':
++    signal.signal(signal.SIGTERM, interrupt)
++    try:
++        main()
++    except (ValueError, OSError, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
++        print(f'File transfer: {error or "cancelled"}', file=sys.stderr)
++        sys.exit(1)
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index 7aa9a6d..aa570e4 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -95,6 +95,7 @@ compat_paths=(
+   etc/systemd/user/graphical-session.target.wants/clipboard-bridge.service
+   usr/local/bin/clipboard-bridge
+   usr/local/bin/clipboard-files
++  usr/local/bin/file-transfer
+   etc/systemd/system/try-omarchy-ready.service
+   etc/systemd/system/multi-user.target.wants/try-omarchy-ready.service
+   etc/systemd/system/try-omarchy-sshd.service
+@@ -127,7 +128,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=18
++compat_revision=19
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/tests/test_file_transfer.py b/guest/tests/test_file_transfer.py
+new file mode 100644
+index 0000000..cc93c8b
+--- /dev/null
++++ b/guest/tests/test_file_transfer.py
+@@ -0,0 +1,83 @@
++import hashlib
++import importlib.machinery
++import importlib.util
++import io
++from pathlib import Path
++import tempfile
++import unittest
++
++HELPER = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/bin/file-transfer'
++loader = importlib.machinery.SourceFileLoader('file_transfer', str(HELPER))
++spec = importlib.util.spec_from_loader(loader.name, loader)
++transfer = importlib.util.module_from_spec(spec)
++loader.exec_module(transfer)
++
++
++class StreamingFileTests(unittest.TestCase):
++    def test_large_round_trip(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            source = root / 'large 世界.bin'
++            with source.open('wb') as file:
++                file.truncate(80 << 20)
++                file.seek(4096)
++                file.write(b'preserved contents')
++            archive = root / 'transfer.zip'
++            offer = transfer.pack([source], archive)
++            self.assertEqual(offer['fileBytes'], 80 << 20)
++            destination = root / 'Received'
++            with archive.open('rb') as stream:
++                result = transfer.receive(stream, offer, destination)
++            with source.open('rb') as a, Path(result['paths'][0]).open('rb') as b:
++                self.assertEqual(hashlib.file_digest(a, 'sha256').digest(), hashlib.file_digest(b, 'sha256').digest())
++
++    def test_failures_preserve_both_sides(self):
++        for failure in ('corrupt', 'truncated', 'extra', 'metadata', 'existing'):
++            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
++                root = Path(tmp)
++                source = root / 'source'
++                source.write_bytes(b'original contents')
++                archive = root / 'transfer.zip'
++                offer = transfer.pack([source], archive)
++                data = archive.read_bytes()
++                destination = root / 'Received'
++                if failure == 'corrupt':
++                    data = b'x' + data[1:]
++                elif failure == 'truncated':
++                    data = data[:-1]
++                elif failure == 'extra':
++                    data += b'x'
++                elif failure == 'metadata':
++                    offer['fileBytes'] += 1
++                else:
++                    destination.mkdir()
++                with self.assertRaises((ValueError, OSError)):
++                    transfer.receive(io.BytesIO(data), offer, destination)
++                self.assertEqual(source.read_bytes(), b'original contents')
++                if destination.exists():
++                    self.assertEqual(list(destination.iterdir()), [])
++                self.assertFalse(any(path.name.startswith('.transfer-in-') for path in root.iterdir()))
++
++    def test_publication_never_replaces_even_an_empty_directory(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            source, destination = root / 'source', root / 'destination'
++            source.mkdir()
++            (source / 'new').write_text('new')
++            destination.mkdir()
++            with self.assertRaises(OSError):
++                transfer.publish(source, destination)
++            self.assertEqual(list(destination.iterdir()), [])
++            self.assertEqual((source / 'new').read_text(), 'new')
++
++    def test_offer_types_and_links(self):
++        self.assertFalse(transfer.valid_offer({'version': True}))
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            source = root / 'source'
++            source.write_text('private')
++            link = root / 'link'
++            link.symlink_to(source)
++            with self.assertRaises(ValueError):
++                transfer.pack([link], root / 'archive.zip')
++            self.assertFalse((root / 'archive.zip').exists())
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index aeca96d..ed72f30 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=18" in finalize_rootfs
++        "compat_revision=19" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+-- 
+2.55.0
+

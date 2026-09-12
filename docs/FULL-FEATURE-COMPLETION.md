@@ -305,3 +305,27 @@ The rebuilt runtime also passed the complete current Omarchy 4.0.3 guest smoke
 under Windows TCG, including trial provisioning and compatibility revision 18.
 Control streams now share the bounded, acknowledged handshake and stop their
 reader when closed, including a full delivery queue during VM restart.
+
+### Streaming file transfer implementation
+
+Clipboard and file-transfer code now share archive inventory validation. The
+new transfer path streams through private files, publishes complete selections
+as one destination folder, and retains timestamps and executable permissions.
+It verifies archive hashes, expanded sizes, entry counts and source stability,
+reserves disk space, supports cancellation and rejects destination collisions
+atomically, even when another process creates the destination during transfer.
+The legacy clipboard frame remains stable for loop prevention.
+
+The Linux guest helper implements the same offer and archive contract. An
+80 MiB selection passed Go-to-guest-helper-to-Go verification, and Windows tests
+passed large files, empty folders, timestamps, cancellation, corruption, quotas,
+source changes and collision handling. The helper is included in guest patch
+0058 and compatibility revision 19; all 94 guest contract tests pass.
+
+Transfer adapters will use this backend for clipboard offers and drag-and-drop
+interactions. Existing signed v17 guest smoke checks use `--compat-revision 18`;
+the current guest source and default smoke check expect revision 19.
+
+The integrated Windows desktop regression run also passes with the streaming
+changes, the private QMP supervisor, and runtime r5. Guest patch 0058 was reapplied
+from the pinned source in a fresh checkout and passed the full contract suite.

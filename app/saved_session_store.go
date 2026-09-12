@@ -107,7 +107,7 @@ func capturePausedSession(ctx context.Context, c *qmpClient, sourceDisk, destina
 	if closeErr != nil {
 		return fail(closeErr)
 	}
-	if err := publishMoveDirectory(stage, destination); err != nil {
+	if err := publishNewDirectory(stage, destination); err != nil {
 		return fail(err)
 	}
 	return record, nil

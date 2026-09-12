@@ -17,6 +17,10 @@ the pinned source recipe. In the nested lab it is extracted to
 Keep it separate from signed release payloads. A final integrated signed candidate will be prepared after feature
 implementation and regression checks.
 
+Guest source now includes the streaming helper at compatibility revision 19.
+When rerunning smoke checks against the signed v17 baseline, pass
+`--compat-revision 18` explicitly.
+
 Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for the signed baseline
 artifacts and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for its test matrix.
 
