@@ -463,6 +463,10 @@ func main() {
 		}
 		logf("using restored guest and runtime for this recovery launch")
 	}
+	snapshotRecovery, err := pinCheckpointBoot(cfg.dir, explicitFlags, release, sumsSHA256, runtimeRelease, runtimeSumsSHA256)
+	if err != nil {
+		fatal("Could not prepare the restored snapshot: %v", err)
+	}
 	completeAtStart := completeInstallExists(cfg.dir, filepath.Base(cfg.disk))
 	needsProvisioning := cfg.fresh || !completeAtStart
 	configureSetupCancellation(!completeAtStart && removeDataOnCancel)
@@ -516,7 +520,7 @@ func main() {
 	// previous run must not be mistaken for this one's.
 	os.Remove(filepath.Join(cfg.vmDir, "qemu-stderr.log"))
 
-	if automaticUpdatesEnabled(cfg, *noUpdate, *release, *sumsSHA256) {
+	if !snapshotRecovery && automaticUpdatesEnabled(cfg, *noUpdate, *release, *sumsSHA256) {
 		checkDue := *updateURL != defaultUpdateURL || updateCheckDue(cfg.dir, time.Now())
 		if checkDue {
 			_ = recordUpdateCheck(cfg.dir, time.Now())
@@ -556,9 +560,9 @@ func main() {
 	const qemuExe = "qemu-system-x86_64w.exe"
 	stockQemu := `C:\Program Files\qemu\` + qemuExe
 	_, stockErr := os.Stat(stockQemu)
-	haveStock := stockErr == nil && !cfg.portable && guestDisplayCount(cfg.displays) == 1
+	haveStock := stockErr == nil && !cfg.portable && !snapshotRecovery && guestDisplayCount(cfg.displays) == 1
 	gpuRoot := ""
-	if !cfg.portable && guestDisplayCount(cfg.displays) == 1 {
+	if !cfg.portable && !snapshotRecovery && guestDisplayCount(cfg.displays) == 1 {
 		_, err := os.Stat(filepath.Join(cfg.winqEmu, "bin", qemuExe))
 		if err == nil {
 			// A user-managed WINQ-EMU install stays under the user's control. Only
@@ -903,6 +907,7 @@ func watch(cfg *config, qmp *qmpConn, exited <-chan error) bool {
 		if guestReady.Swap(false) {
 			commitLauncherUpdate(cfg.dir)
 			commitPayloadUpdates(cfg.dir)
+			commitCheckpointBoot(cfg.dir)
 			recordRenderResult(cfg)
 			movedBootPending = true
 		}

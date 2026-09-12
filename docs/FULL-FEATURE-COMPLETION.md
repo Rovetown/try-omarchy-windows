@@ -358,3 +358,12 @@ and 16-byte USB identity buffers rejecting valid deeper hub paths. Runtime r6
 expands all three USB port buffers; the formatter test now checks caller sizes
 as well as truncation behavior. Runtime r5 remains the previously tested baseline
 until the r6 build and runtime tests finish.
+
+The same review found two recovery integration gaps. Retained portable copies
+now carry authenticated manifests and launch with their original guest/runtime
+identities and automatic updates disabled. Their generated batch arguments are
+quoted with delayed expansion disabled. Active snapshot rollback now retains
+its payload identities until the first successful guest boot, preventing an
+immediate update before the restored state is usable. Explicit release overrides
+remain available. Tests verify offline manifest/receipt matching, changed
+manifest rejection, command quoting and failed-boot retries.

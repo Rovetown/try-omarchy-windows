@@ -256,6 +256,9 @@ func (s checkpointStore) rollbackUsingTool(id, tool string, report backupProgres
 			return "", err
 		}
 	}
+	if err := markCheckpointBoot(next); err != nil {
+		return "", err
+	}
 	state := checkpointRollbackState{Version: 1, ID: randomCheckpointRollbackID()}
 	for _, name := range checkpointRollbackNames() {
 		previous, err := rollbackPathExists(filepath.Join(s.installation, name))

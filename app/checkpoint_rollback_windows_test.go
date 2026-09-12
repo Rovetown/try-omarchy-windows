@@ -10,12 +10,12 @@ import (
 )
 
 func TestCheckpointRecoveryPortableLaunchers(t *testing.T) {
-	root := t.TempDir()
-	dir := filepath.Join(root, "data")
-	if err := os.MkdirAll(filepath.Join(dir, "vm"), 0700); err != nil {
-		t.Fatal(err)
+	dir, payload := portableRecoveryFixture(t)
+	root := filepath.Dir(dir)
+	digest, ok := installReceiptArtifactSHA256(filepath.Join(dir, "guest"), "rootfs.ext4")
+	if !ok {
+		t.Fatal("missing fixture identity")
 	}
-	digest := writePortableGuestReceipt(t, filepath.Join(dir, "guest"), []byte("factory"))
 	disk := filepath.Join(dir, "vm", "disk.qcow2")
 	if err := createQcow2Overlay(disk, "../guest/rootfs.ext4", 4<<20); err != nil {
 		t.Fatal(err)
@@ -23,12 +23,12 @@ func TestCheckpointRecoveryPortableLaunchers(t *testing.T) {
 	if err := writePortableBackingState(disk, digest); err != nil {
 		t.Fatal(err)
 	}
-	if err := createRollbackRecoveryLaunchers(dir); err != nil {
+	if err := createRollbackRecoveryLaunchers(dir, filepath.Join(filepath.Dir(payload), "data")); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"Start Omarchy.cmd", "Settings.cmd"} {
 		data, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil || !strings.Contains(string(data), `"%~dp0TryOmarchy.exe" -portable`) {
+		if err != nil || !strings.Contains(string(data), `"%~dp0TryOmarchy.exe" "-portable" "-no-update"`) {
 			t.Fatalf("%s: %s %v", name, data, err)
 		}
 	}

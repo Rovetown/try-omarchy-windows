@@ -187,7 +187,7 @@ func runCheckpointUI(dir string) error {
 						recoveryFolder = filepath.Dir(retained)
 					}
 					message := "Snapshot restored. Open Try Omarchy normally to use it.\n\nYour previous state is retained at:\n\n" + recoveryFolder
-					if err := createRollbackRecoveryLaunchers(retained); err != nil {
+					if err := createRollbackRecoveryLaunchers(retained, dir); err != nil {
 						message += "\n\nCould not create recovery shortcuts: " + err.Error()
 					}
 					return outcome{message: message}
