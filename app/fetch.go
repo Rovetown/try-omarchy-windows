@@ -262,7 +262,9 @@ func decompress(src, dest, wantSum string, ui *progressUI) error {
 		return err
 	}
 	counted := &countingReader{r: in}
-	dec, err := zstd.NewReader(counted)
+	// Larger windows compress repeated guest packages without removing features.
+	// Keep enough history to avoid repeatedly copying the whole window.
+	dec, err := zstd.NewReader(counted, zstd.WithDecoderLowmem(false))
 	if err != nil {
 		return err
 	}

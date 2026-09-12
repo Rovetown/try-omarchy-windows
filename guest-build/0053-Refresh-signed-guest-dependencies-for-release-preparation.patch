@@ -1,0 +1,36 @@
+From 7ca169d7fc1d0a0c718a527693507c079cafbd18 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 11:33:30 -0400
+Subject: [PATCH] Refresh signed guest dependencies for release preparation
+
+---
+ guest/packages.lock.json | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/guest/packages.lock.json b/guest/packages.lock.json
+index 8e30a16..c5f8cab 100644
+--- a/guest/packages.lock.json
++++ b/guest/packages.lock.json
+@@ -258,7 +258,7 @@
+     "libfreeaptx": "0.2.2-1",
+     "libfyaml": "0.9.6-3",
+     "libgcc": "16.2.1+r23+gd564253eb6c8-1",
+-    "libgcrypt": "1.12.3-1",
++    "libgcrypt": "1.12.4-1",
+     "libgfortran": "16.2.1+r23+gd564253eb6c8-1",
+     "libgirepository": "1.86.0-2",
+     "libgit2": "1:1.9.7-1",
+@@ -327,8 +327,8 @@
+     "libplacebo": "7.360.1-6",
+     "libplist": "2.7.0-3",
+     "libpng": "1.6.58-2",
+-    "libportal": "0.10.0-1",
+-    "libportal-gtk4": "0.10.0-1",
++    "libportal": "0.11.0-1",
++    "libportal-gtk4": "0.11.0-1",
+     "libproxy": "0.5.12-1",
+     "libpsl": "0.21.5-2",
+     "libpulse": "17.0+r98+gb096704c0-1",
+-- 
+2.55.0
+
