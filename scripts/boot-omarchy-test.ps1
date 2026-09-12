@@ -3,6 +3,7 @@
 # flags: whpx + q35 + qemu64, virtio disk/net/input, sparse NTFS disk), headless
 # with QMP screendumps at intervals so the host can watch boot progress.
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\qmp-transport.ps1"
 $g = '\\host.lan\Data\tryomarchy\guest'
 $wd = 'C:\tryomarchy'
 $vm = Join-Path $wd 'vm'
@@ -34,17 +35,17 @@ $qemuArgs = @(
     '-device','virtio-net-pci,netdev=n0','-netdev','user,id=n0',
     '-device','virtio-rng-pci',
     '-display','none',
-    '-qmp','tcp:127.0.0.1:4445,server=on,wait=off',
+     '-qmp',"unix:$((Get-OmarchyQmpPath 4445).Replace(',',',,')),server=on,wait=off",
     '-serial',"file:$wd\omarchy-serial.log"
 )
+Initialize-OmarchyQmpControl
 $p = Start-Process -FilePath 'C:\Program Files\qemu\qemu-system-x86_64.exe' `
     -ArgumentList $qemuArgs -RedirectStandardError "$wd\omarchy-qemu-err.log" `
     -RedirectStandardOutput "$wd\omarchy-qemu-out.log" -PassThru -WindowStyle Hidden
 Write-Host "qemu pid $($p.Id)"
 
 function Invoke-Qmp([string[]]$cmds) {
-    $tcp = New-Object Net.Sockets.TcpClient('127.0.0.1', 4445)
-    $s = $tcp.GetStream(); $s.ReadTimeout = 5000
+    $s = New-OmarchyQmpStream 4445; $s.ReadTimeout = 5000
     $w = New-Object IO.StreamWriter($s); $w.AutoFlush = $true
     $r = New-Object IO.StreamReader($s)
     $r.ReadLine() | Out-Null
@@ -54,7 +55,7 @@ function Invoke-Qmp([string[]]$cmds) {
         $w.WriteLine($c); Start-Sleep -Milliseconds 800
         try { Write-Host $r.ReadLine() } catch {}
     }
-    $tcp.Close()
+    $s.Close()
 }
 
 foreach ($t in 60, 120, 180, 240) {

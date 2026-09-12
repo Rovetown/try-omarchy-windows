@@ -37,6 +37,7 @@ type config struct {
 	lanPublic                   bool
 	instant, portable           bool
 	guestDir, vmDir, disk       string
+	qmpDir                      string
 	diskFormat                  string
 	qemu                        string
 	useGpu                      bool
@@ -761,6 +762,11 @@ func supervise(cfg *config, cmdline string) bool {
 		logf("booting - %s (attempt %d)", mode, attempt)
 		pendingReboot.Store(false)
 		guestReady.Store(false)
+		controlDir, err := prepareQMPControl()
+		if err != nil {
+			fatal("Cannot prepare private VM controls: %v", err)
+		}
+		cfg.qmpDir = controlDir
 		proc = exec.Command(cfg.qemu, buildQemuArgs(cfg, cmdline)...)
 		// The w-binary's startup errors (bad args, SDL init) only ever reach
 		// stderr; without this they vanish and a dead QEMU is undebuggable.

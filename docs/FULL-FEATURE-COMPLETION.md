@@ -256,3 +256,15 @@ test process and uses the observed Windows OK control.
 The real runtime smoke test caught a q35 limitation: its root PCIe bus cannot
 hotplug a controller. The launcher now creates the USB controller at startup;
 the manager attaches and releases devices on that existing bus.
+
+### Private runtime controls
+
+The launcher and PowerShell tools now connect to QMP through Windows filesystem
+sockets in the user's local application directory. A guest-network test confirmed
+that host loopback TCP is reachable from the guest, so binding privileged controls
+to loopback did not provide the required separation. Startup preserves unknown
+files, refuses live runtime sockets and removes only stale control sockets.
+
+Linux race tests and native Windows tests pass for private connections, path
+validation, live-owner protection, stale recovery and the USB manager. The native
+PowerShell connection, status command and key-forwarder compilation also pass.

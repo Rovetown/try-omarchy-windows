@@ -8,6 +8,7 @@
 #   powershell -ExecutionPolicy Bypass -File winkey-forwarder.ps1 [-QmpPort 4446]
 param([int]$QmpPort = 4446)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\qmp-transport.ps1"
 
 Add-Type -TypeDefinition @"
 using System;
@@ -15,6 +16,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -40,7 +42,19 @@ public static class WinKeyForwarder
     static AutoResetEvent kick = new AutoResetEvent(false);
     static bool winDown = false;
     static volatile int qemuPid = -1;
-    static int qmpPort = 4446;
+    static string qmpPath;
+    class PrivateEndpoint : EndPoint {
+        readonly string path;
+        public PrivateEndpoint(string value){path=value;}
+        public override AddressFamily AddressFamily { get {return AddressFamily.Unix;} }
+        public override SocketAddress Serialize(){
+            byte[] bytes=Encoding.UTF8.GetBytes(path);
+            var address=new SocketAddress(AddressFamily.Unix,bytes.Length+3);
+            for(int i=0;i<bytes.Length;i++)address[i+2]=bytes[i];
+            return address;
+        }
+        public override EndPoint Create(SocketAddress address){return this;}
+    }
 
     static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam)
     {
@@ -109,15 +123,16 @@ public static class WinKeyForwarder
         {
             try
             {
-                using (TcpClient tcp = new TcpClient("127.0.0.1", qmpPort))
+                using (Socket tcp = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified))
                 {
-                    NetworkStream s = tcp.GetStream();
+                    tcp.Connect(new PrivateEndpoint(qmpPath));
+                    NetworkStream s = new NetworkStream(tcp, false);
                     StreamWriter w = new StreamWriter(s); w.AutoFlush = true;
                     StreamReader r = new StreamReader(s);
                     r.ReadLine();
                     w.WriteLine("{\"execute\":\"qmp_capabilities\"}");
                     r.ReadLine();
-                    Console.WriteLine("QMP connected on port " + qmpPort);
+                    Console.WriteLine("QMP connected over its private socket");
                     while (tcp.Connected)
                     {
                         kick.WaitOne(1000);
@@ -139,9 +154,9 @@ public static class WinKeyForwarder
     [DllImport("user32.dll")] static extern bool PeekMessage(out MSG m, IntPtr h, uint mi, uint ma, uint remove);
     const uint QS_ALLINPUT = 0x04FF, PM_REMOVE = 1;
 
-    public static void Run(int port)
+    public static void Run(string path)
     {
-        qmpPort = port;
+        qmpPath = path;
         Thread t1 = new Thread(PidRefresher); t1.IsBackground = true; t1.Start();
         Thread t2 = new Thread(QmpWorker); t2.IsBackground = true; t2.Start();
         keep = Callback;
@@ -163,4 +178,4 @@ public static class WinKeyForwarder
 }
 "@
 
-[WinKeyForwarder]::Run($QmpPort)
+[WinKeyForwarder]::Run((Get-OmarchyQmpPath $QmpPort))

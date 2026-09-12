@@ -22,6 +22,7 @@ type config struct {
 	lanPublic                   bool
 	instant, portable           bool
 	guestDir, vmDir, disk       string
+	qmpDir                      string
 	diskFormat                  string
 	qemu                        string
 	useGpu                      bool

@@ -1,7 +1,7 @@
 package main
 
-// Fixed loopback ports used only for communication between the Windows shell,
-// QEMU, and the guest. User-configured TCP forwards must not reuse them.
+// The QMP values identify private socket roles and remain reserved for older
+// installations. Clipboard, lifecycle and agent services use loopback TCP.
 const (
 	qmpToolsPort  = 4445
 	qmpFwdPort    = 4446

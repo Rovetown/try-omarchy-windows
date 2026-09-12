@@ -73,7 +73,7 @@ func (s *usbUIState) start(action string) {
 	go func() {
 		defer cancel()
 		var result usbUIResult
-		client, err := dialQMPClient(ctx, fmt.Sprintf("127.0.0.1:%d", qmpToolsPort))
+		client, err := dialQMPControl(ctx, qmpToolsPort)
 		if err == nil {
 			defer client.Close()
 			broker := usbBroker{qmp: client}

@@ -2,14 +2,13 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"strings"
 	"time"
 )
 
-// qmpConn is a handshaken QMP connection. A wedged QEMU accepts the TCP
-// connect but its main loop never answers, so only a completed greeting +
+// qmpConn is a handshaken QMP connection. A wedged QEMU accepts a socket
+// connection but its main loop never answers, so only a completed greeting +
 // qmp_capabilities exchange counts as "QEMU is alive" (the launch watchdog
 // depends on that distinction).
 type qmpConn struct {
@@ -18,7 +17,12 @@ type qmpConn struct {
 }
 
 func qmpConnect(port int, readTimeout time.Duration) *qmpConn {
-	tcp, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 3*time.Second)
+	path, err := qmpControlPath(port)
+	if err != nil {
+		logf("qmp: %v", err)
+		return nil
+	}
+	tcp, err := net.DialTimeout("unix", path, 3*time.Second)
 	if err != nil {
 		logf("qmp %d: dial: %v", port, err)
 		return nil

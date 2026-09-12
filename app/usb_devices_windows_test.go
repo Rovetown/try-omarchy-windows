@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
 	"os"
 	"sync/atomic"
@@ -18,9 +17,21 @@ func TestNativeUSBManagerRefreshAndClose(t *testing.T) {
 	if os.Getenv("TRYOMARCHY_NATIVE_UI_TEST") != "1" {
 		t.Skip("requires an interactive Windows desktop")
 	}
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", qmpToolsPort))
+	dir, err := os.MkdirTemp(os.TempDir(), "tom-usb-")
 	if err != nil {
-		t.Skip("QMP port is occupied; preserve the running VM")
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	previous := qmpControlDirectory
+	qmpControlDirectory = func() (string, error) { return dir, nil }
+	defer func() { qmpControlDirectory = previous }()
+	path, err := qmpControlPath(qmpToolsPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
 	}
 	defer listener.Close()
 	var refreshes atomic.Int32

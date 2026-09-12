@@ -4,7 +4,7 @@
 #   - window opens MAXIMIZED (taskbar visible; never fullscreen by default)
 #   - one guest-rendered mouse cursor, without SDL forcing a second host cursor
 #   - guest console sized to the maximized client area (video=WxH on the cmdline)
-#   - winkey-forwarder and clipboard bridge up (QMP 4446 + clip 4448/4449)
+#   - winkey-forwarder and clipboard bridge up (private QMP + clip 4448/4449)
 #   powershell -ExecutionPolicy Bypass -File verify-launch-ux.ps1
 $ErrorActionPreference = 'Stop'
 $fail = 0
@@ -35,8 +35,9 @@ Check 'guest console sized to host (video=WxH)' ($cl -match 'video=\d+x\d+')
 Check 'no legacy console binary in use' ($cl -notmatch 'qemu-system-x86_64\.exe')
 
 $net = netstat -ano | Out-String
-Check 'winkey-forwarder connected (4446)' ($net -match ':4446\s+\S+\s+ESTABLISHED')
-Check 'supervisor connected (4447)' ($net -match ':4447\s+\S+\s+ESTABLISHED')
+Check 'private keyboard control socket configured' ($cl -match 'unix:.*forward.sock')
+Check 'private supervisor control socket configured' ($cl -match 'unix:.*supervisor.sock')
+Check 'no guest-accessible QMP TCP listener configured' ($cl -notmatch 'tcp:127.0.0.1:444[567]')
 Check 'clipboard bridge listening (4448+4449)' (($net -match ':4448\s+\S+\s+LISTENING') -and ($net -match ':4449\s+\S+\s+LISTENING'))
 
 if ($fail) { Write-Host "$fail check(s) FAILED" -ForegroundColor Red; exit 1 }

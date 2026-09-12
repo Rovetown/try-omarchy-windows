@@ -1,6 +1,7 @@
 # Start the Omarchy guest under WHPX and keep it running while this session lives.
 # Disk persists at C:\tryomarchy\vm\disk.raw (prepared by boot-omarchy-test.ps1).
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\qmp-transport.ps1"
 $g = '\\host.lan\Data\tryomarchy\guest'
 $wd = 'C:\tryomarchy'
 $disk = Join-Path $wd 'vm\disk.raw'
@@ -22,9 +23,10 @@ $qemuArgs = @(
     '-device','virtio-net-pci,netdev=n0','-netdev','user,id=n0',
     '-device','virtio-rng-pci',
     '-display','vnc=127.0.0.1:7',
-    '-qmp','tcp:127.0.0.1:4445,server=on,wait=off',
+    '-qmp',"unix:$((Get-OmarchyQmpPath 4445).Replace(',',',,')),server=on,wait=off",
     '-serial',"file:$wd\omarchy-serial.log"
 )
+Initialize-OmarchyQmpControl
 $p = Start-Process -FilePath 'C:\Program Files\qemu\qemu-system-x86_64.exe' `
     -ArgumentList $qemuArgs -RedirectStandardError "$wd\omarchy-qemu-err.log" `
     -RedirectStandardOutput "$wd\omarchy-qemu-out.log" -PassThru -WindowStyle Hidden

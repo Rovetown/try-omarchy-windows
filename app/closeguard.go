@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -79,7 +78,7 @@ func runCloseGuard() {
 		if r == idYes {
 			logf("close confirmed - graceful guest shutdown")
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			c, err := dialQMPClient(ctx, fmt.Sprintf("127.0.0.1:%d", qmpToolsPort))
+			c, err := dialQMPControl(ctx, qmpToolsPort)
 			if err == nil {
 				err = c.Call(ctx, "system_powerdown", nil, nil)
 				c.Close()

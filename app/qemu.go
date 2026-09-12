@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// buildQemuArgs is the argument recipe from scripts/launch-omarchy.ps1,
-// unchanged: GPU mode is WINQ-EMU's stack (patched WHPX survives -cpu host;
+// buildQemuArgs selects the native runtime devices and private controls.
+// Rendering follows scripts/launch-omarchy.ps1: GPU mode is WINQ-EMU's stack (patched WHPX survives -cpu host;
 // virtio-vga-gl IS the VGA device, so no -vga none), CPU mode is stock QEMU
 // with the fastest flags upstream WHPX survives (any XSAVE/AVX feature panics
 // the guest kernel) and the mandatory -vga none for virtio-gpu-pci.
@@ -80,9 +80,9 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 		// has no device (QEMU exits at startup otherwise).
 		"-audiodev", cfg.audio+",id=snd",
 		"-device", "virtio-sound-pci,audiodev=snd",
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server=on,wait=off", qmpToolsPort),
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server=on,wait=off", qmpFwdPort),
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server=on,wait=off", qmpSupPort),
+		"-qmp", "unix:"+qemuOptionValue(filepath.Join(cfg.qmpDir, qmpControlName(qmpToolsPort)))+",server=on,wait=off",
+		"-qmp", "unix:"+qemuOptionValue(filepath.Join(cfg.qmpDir, qmpControlName(qmpFwdPort)))+",server=on,wait=off",
+		"-qmp", "unix:"+qemuOptionValue(filepath.Join(cfg.qmpDir, qmpControlName(qmpSupPort)))+",server=on,wait=off",
 		"-D", filepath.Join(vm, "qemu.log"),
 		// In-guest reboot/poweroff wedges upstream WHPX (vCPUs never return
 		// from system reset). Exit instead; the supervisor relaunches on reset.
