@@ -69,6 +69,10 @@ Windows VM tests unless noted in the release checklist):
   launcher commits a guest-image update. Its explicit integration revision is
   bumped whenever those files must be reapplied without a kernel version change
 
+Patch 0047 supplies the upstream lock PAM profile in fresh images and repairs
+only missing profiles on older guests. Existing administrator policies remain
+intact, including during runtime package upgrades.
+
 Existing guests can install the image's Omarchy runtime through the normal
 **Update > Omarchy** action. See [guest upgrades](../docs/GUEST-UPGRADES.md) for
 the delivery mechanism, recovery, and validation requirements.

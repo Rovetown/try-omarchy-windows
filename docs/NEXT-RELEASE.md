@@ -8,8 +8,10 @@ Implementation status: the branch now contains the move engine and Settings
 controls, interruption and data-preservation tests, a measured zero-scan
 improvement, a reclaim short-read fix, shared runtime-receipt parsing, and doc
 corrections. See [MOVING.md](MOVING.md) and [PERFORMANCE.md](PERFORMANCE.md).
-Linux tests and Windows cross-compilation are available; native Windows and
-physical candidate checks remain release gates. No new release is published.
+Linux tests, Windows cross-compilation, 228 native Windows tests and a full
+Windows move, stale-path launch and retained-source cleanup have passed. See
+[combined candidate](COMBINED-CANDIDATE.md) for exact evidence and limitations.
+Physical and signed-candidate checks remain gates. No new release is published.
 
 The release should make existing installations easier to manage, improve
 measured performance, and remove unnecessary complexity. Stable v1 remains

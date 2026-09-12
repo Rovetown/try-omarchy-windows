@@ -6,15 +6,17 @@ remain unchanged.
 
 ## Payload identity
 
-The guest is the image validated by #92, including the full 4.0.2 to 4.0.3
-upgrade and five boot checks. It uses runtime `4.0.3-2`, compatibility revision 14,
-and the currently published WINQ-EMU runtime. The source-built runtime is still
-a separate hardware-validation gate.
+The guest extends the image validated by #92 with lock authentication repair
+and the current signed package transaction. It uses runtime `4.0.3-3`,
+compatibility revision 15, Chromium `153.0.8010.36-1`, Hyprland `0.56.2-3` and
+gpu-screen-recorder `6.1.2-1`. The combined payload retains published WINQ-EMU
+Alpha 10; the source-built runtime is a separate hardware-validation gate.
+The earlier image passed a full 4.0.2 to 4.0.3 upgrade and five boot checks.
 
 The combined payload checksum-list SHA256 is:
 
 ```text
-0d379bcb4a38be357fa07bdc58af676a6248e7d17961eb86212b9f4f32fa1830
+982e012b84869d65ad94633c6d7c06ab1b93d672f402aeedddca1893a7ff1570
 ```
 
 It includes the guest's checked artifacts and the runtime/source archives from
@@ -43,7 +45,7 @@ explicit test data directory:
 ```powershell
 .\TryOmarchy-runtime-test.exe -dir 'D:\Omarchy Candidate' -no-update `
   -release http://TEST-HOST:18081/payload `
-  -sums-sha256 0d379bcb4a38be357fa07bdc58af676a6248e7d17961eb86212b9f4f32fa1830
+  -sums-sha256 982e012b84869d65ad94633c6d7c06ab1b93d672f402aeedddca1893a7ff1570
 ```
 
 The release environment currently permits only `master`. No branch policy was
@@ -60,7 +62,7 @@ The workflow uploads a test artifact and does not create or publish a release.
 - All 228 native launcher tests passed on Windows 11 Enterprise build 26200.
   The idle-download test now holds the response open until cancellation instead
   of depending on a short server sleep, which was unreliable on the busy VM.
-- Guest patch reconstruction, 70 guest tests, and 13 release-helper tests passed.
+- Guest patch reconstruction, 76 guest tests, and 13 release-helper tests passed.
 - All four PowerShell workflow blocks passed Windows PowerShell syntax checks.
 - The unsigned combined launcher booted Omarchy 4.0.3 to its desktop in the
   Windows VM. Terminal and shared-folder access worked, with no failed user
@@ -75,7 +77,29 @@ The workflow uploads a test artifact and does not create or publish a release.
   to `D:\TryOmarchyCandidate`. Copy verification and activation completed, the
   source was retained, and the relocated guest reported ready on its next boot.
   A saved document kept its exact SHA-256, Omarchy reported 4.0.3, and there
-  were no failed user services. Cleanup of the retained source was not exercised.
+  were no failed user services. Launching the original path used the moved
+  installation and retained a document created after the move. Cleanup refused
+  a changed original settings file, then succeeded after it was restored. The
+  moved guest booted afterward with both documents unchanged and an unrelated
+  file outside the installation preserved. These storage checks used the prior
+  payload checksum `0d379bcb4a38be357fa07bdc58af676a6248e7d17961eb86212b9f4f32fa1830`.
+- Personalized Linux VM testing exposed a missing PAM profile: the lock action
+  returned `missing-pam` and left the desktop unlocked. Patch 0047 runs the
+  pinned upstream lock setup in fresh images, packages its configuration with
+  backup semantics, and repairs only missing profiles on existing guests.
+  Wrong-password rejection and successful unlock were observed. Booting the
+  new initramfs repaired the same existing personalized disk; a custom policy
+  survived both repair and the runtime upgrade to `4.0.3-3`.
+- The final image passed its boot smoke test, including PAM ownership, exact
+  profile contents, runtime version, browser policy, media tools and update
+  repository. The personalized guest also completed the normal Omarchy update
+  to the refreshed package versions with no Hyprland configuration errors.
+  Its orphan-removal and reboot prompts were answered during the test.
+- A Windows payload update was deliberately interrupted immediately after
+  activation, before guest readiness. The next launch restored the prior
+  receipt and payload, booted successfully, cleared the pending state, and
+  preserved both saved documents. This tests guest payload recovery using an
+  unsigned launcher; it does not validate signed launcher-update rollback.
 - The Windows VM has Hypervisor Platform enabled, but the full Hyper-V feature
   is disabled. This is nested-VM evidence, not physical-hardware acceptance.
 

@@ -1,7 +1,8 @@
 # Release completion, September 12
 
 Baseline: v0.0.14-preview on master, Omarchy 4.0.2 factory image, WINQ-EMU
-Alpha 10. Installation moves remain in draft PR #86. This audit branch does
+Alpha 10. Draft PR #93 combines installation moves, Omarchy 4.0.3 and persistent guest
+upgrades. This branch does
 not change the public payload pin or publish a release.
 
 ## Current implementation
@@ -39,8 +40,10 @@ acceptance, not a claim of complete bare-metal parity:
 - Docker and printing services: optional packages are not currently shipped.
 - SDDM and login configuration: retain first-run provisioning and VM autologin;
   verify personalized provisioning and lock/unlock with 4.0.3.
-- Authentication: inspect the installed PAM profile and upstream lock setup,
-  including lock-screen authentication under the candidate shell.
+- Authentication: personalized testing found a missing lock PAM profile. Patch
+  0047 runs the upstream setup during image creation and supplies missing-only
+  repair for existing guests. Password rejection, successful unlock and
+  preservation of a custom policy have been exercised.
 - SSH command environment and keepalives: evaluate alongside session-only SSH.
 - Existing user shell and application configs: preserve user changes. Their
   migration must be tested separately from the new factory skeleton.
@@ -50,11 +53,11 @@ acceptance, not a claim of complete bare-metal parity:
 1. Fresh factory boot and personalized setup, theme changes without prompts,
    valid browser color policy, normal package update and interrupted-update
    recovery. Check both GPU and CPU paths.
-2. Existing writable guests: demonstrate an in-place Omarchy version upgrade.
-   The local try-omarchy-runtime package has no remote upgrade feed. Updating
-   launcher integration alone does not upgrade that package. Do not promise
-   that Update > Omarchy currently advances its source pin, or require a reset
-   as the long-term upgrade solution.
+2. Existing writable guests: the authenticated payload now delivers a local
+   runtime upgrade offer. The normal updater has been tested from 4.0.2 to
+   4.0.3 with user data and configuration preserved. See
+   [guest upgrades](../GUEST-UPGRADES.md) for the mechanism and evidence; exact
+   signed-candidate Windows acceptance is still required.
 3. Complete independent review and Windows acceptance for PR #86: moves,
    retained originals, cancellation, disconnects, low space and recovery.
 4. Validate and pin source-built WINQ-EMU with matching source. AMD, Intel,
