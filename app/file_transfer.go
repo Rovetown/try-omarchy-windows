@@ -156,11 +156,18 @@ func prepareFileTransfer(ctx context.Context, sources []string, cache string, li
 	return offer, file.Name(), nil
 }
 
+func (offer fileTransferOffer) valid(limits fileTransferLimits) bool {
+	return limits.valid() && offer.Version == 1 && validSHA256(offer.SHA256) &&
+		offer.ArchiveBytes > 0 && offer.ArchiveBytes <= limits.ArchiveBytes &&
+		offer.FileBytes >= 0 && offer.FileBytes <= limits.Bytes &&
+		offer.Entries >= 1 && offer.Entries <= limits.Entries
+}
+
 // receiveFileTransfer is called only after a destination is accepted. It never
 // merges into existing files. A complete selection is published as one folder;
 // callers choose a new destination for keep-both collision behavior.
 func receiveFileTransfer(ctx context.Context, input io.Reader, offer fileTransferOffer, destination string, limits fileTransferLimits, report backupProgress) (err error) {
-	if !limits.valid() || offer.Version != 1 || !validSHA256(offer.SHA256) || offer.ArchiveBytes <= 0 || offer.ArchiveBytes > limits.ArchiveBytes || offer.FileBytes < 0 || offer.FileBytes > limits.Bytes || offer.Entries < 1 || offer.Entries > limits.Entries {
+	if !offer.valid(limits) {
 		return fmt.Errorf("invalid file transfer offer")
 	}
 	if !filepath.IsAbs(destination) {

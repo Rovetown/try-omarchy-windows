@@ -329,3 +329,15 @@ the current guest source and default smoke check expect revision 19.
 The integrated Windows desktop regression run also passes with the streaming
 changes, the private QMP supervisor, and runtime r5. Guest patch 0058 was reapplied
 from the pinned source in a fresh checkout and passed the full contract suite.
+
+Archive validation now checks the ZIP directory before allocating its entries,
+including ZIP64 offsets, actual entry count and metadata bounds. Guest patch
+0059 passes the fresh 95-test contract suite and the Windows metadata tests pass.
+
+The transfer service registers selected sources and accepted destinations with
+random capability tokens. Downloads support byte ranges; uploads verify the
+complete offer before publishing and allow bounded retries. Cancellation closes
+stalled connections and releases the disk queue. Completed destinations survive
+cancellation and service shutdown. Five service tests pass on Linux with the
+race detector and on Windows, including a deliberately stalled HTTP upload.
+The listener bounds request headers and connection lifetimes.
