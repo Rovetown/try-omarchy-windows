@@ -1,10 +1,13 @@
 #!/bin/sh
-# Clipboard bridge (guest side) for two-way text sync with the Windows host.
-# It waits for the active Wayland session and restarts both directions if the
-# compositor is replaced. 10.0.2.2 is the host under QEMU user networking.
+# Clipboard bridge (guest side) for two-way text and image sync with the
+# Windows host. It waits for the active Wayland session and restarts both
+# directions if the compositor is replaced. 10.0.2.2 is the host under QEMU
+# user networking. One line per item: base64 text, or "png:" + base64 PNG.
 HOST=10.0.2.2
 PUSH_PORT=4448
 PULL_PORT=4449
+TEXT_LIMIT=8388608
+IMAGE_LIMIT=16777216
 
 XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 STATE=$XDG_RUNTIME_DIR/try-omarchy-clipboard
@@ -14,34 +17,71 @@ mkdir -p "$STATE"
 
 # wl-paste supplies the selected text on stdin. Keeping it in a file preserves
 # trailing newlines and avoids a second clipboard read after the selection moves.
-if [ "${1:-}" = --push ] || [ "${1:-}" = --receive ]; then
+case "${1:-}" in
+--push|--receive|--push-image|--receive-image|--push-files|--receive-files)
+  # URI selections belong to the file watcher, never the text bridge.
+  if [ "$1" = --push ] && wl-paste --list-types 2>/dev/null | grep -Eq '^(text/uri-list|x-special/gnome-copied-files)$'; then exit 0; fi
+  kind=text
+  limit=$TEXT_LIMIT
+  case $1 in
+  --push-image|--receive-image) kind=png; limit=$IMAGE_LIMIT ;;
+  --push-files|--receive-files) kind=files; limit=$IMAGE_LIMIT ;;
+  esac
   outgoing=$(mktemp "$STATE/outgoing.XXXXXX") || exit 1
   trap 'rm -f "$outgoing"' EXIT
-  head -c 8388609 > "$outgoing" || exit 1
+  head -c $((limit + 1)) > "$outgoing" || exit 1
   size=$(wc -c < "$outgoing")
-  [ "$size" -gt 0 ] && [ "$size" -le 8388608 ] || exit 0
+  [ "$size" -gt 0 ] && [ "$size" -le "$limit" ] || exit 0
   # Serialize both directions, including delivery. A completed push must not
   # overwrite the state of a newer host value received while it was sending.
   exec 9> "$STATE/lock"
   flock -x 9 || exit 1
+  if [ "$1" = --push-files ]; then
+    clipboard-files pack < "$outgoing" > "$outgoing.zip" || { rm -f "$outgoing.zip"; exit 1; }
+    mv "$outgoing.zip" "$outgoing" || exit 1
+  fi
   sha=$(sha256sum < "$outgoing" | cut -d' ' -f1)
-  if [ "$1" = --receive ]; then
+  case $1 in
+  --receive|--receive-image|--receive-files)
     printf '%s\n' "$sha" > "$STATE/last_content"
     # wl-copy forks a clipboard owner. It must not inherit the lock descriptor.
-    if ! wl-copy < "$outgoing" 9>&-; then
+    if [ "$kind" = files ]; then
+      clipboard-files unpack < "$outgoing" > "$outgoing.uris" || { rm -f "$outgoing.uris" "$STATE/last_content"; exit 1; }
+      # Hash our local snapshot representation to suppress the file watcher echo.
+      if ! clipboard-files pack < "$outgoing.uris" > "$outgoing.zip"; then
+        clipboard-files discard < "$outgoing.uris" || true
+        rm -f "$outgoing.uris" "$outgoing.zip" "$STATE/last_content"; exit 1
+      fi
+      sha256sum < "$outgoing.zip" | cut -d' ' -f1 > "$STATE/last_content"
+      rm -f "$outgoing.zip"
+      wl-copy --type text/uri-list < "$outgoing.uris" 9>&-
+      result=$?
+      if [ "$result" -ne 0 ]; then clipboard-files discard < "$outgoing.uris" || true; fi
+      rm -f "$outgoing.uris"
+      [ "$result" -eq 0 ]
+    elif [ "$kind" = png ]; then
+      wl-copy --type image/png < "$outgoing" 9>&-
+    else
+      wl-copy < "$outgoing" 9>&-
+    fi || {
       rm -f "$STATE/last_content"
       exit 1
-    fi
+    }
     exit 0
-  fi
+    ;;
+  esac
   [ "$sha" = "$(cat "$STATE/last_content" 2>/dev/null)" ] && exit 0
-  if { base64 -w0 < "$outgoing"; echo; } | timeout 10s socat -u - TCP:$HOST:$PUSH_PORT,connect-timeout=3 2>/dev/null 9>&-; then
+  prefix=""
+  [ "$kind" = png ] && prefix="png:"
+  [ "$kind" = files ] && prefix="files:"
+  if { printf '%s' "$prefix"; base64 -w0 < "$outgoing"; echo; } | timeout 20s socat -u - TCP:$HOST:$PUSH_PORT,connect-timeout=3 2>/dev/null 9>&-; then
     printf '%s\n' "$sha" > "$STATE/last_content"
   else
     exit 1
   fi
   exit 0
-fi
+  ;;
+esac
 
 find_wayland() {
   if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
@@ -59,13 +99,20 @@ find_wayland() {
 }
 
 PULL_PID=
+IMAGE_PID=
+FILES_PID=
+GNOME_FILES_PID=
 cleanup() {
 	pull_pid=$PULL_PID
+	image_pid=$IMAGE_PID
 	PULL_PID=
-	if [ -n "$pull_pid" ]; then
-		kill "$pull_pid" 2>/dev/null || true
-		wait "$pull_pid" 2>/dev/null || true
-	fi
+	IMAGE_PID=
+	for pid in $pull_pid $image_pid $FILES_PID $GNOME_FILES_PID; do
+		kill "$pid" 2>/dev/null || true
+		wait "$pid" 2>/dev/null || true
+	done
+  FILES_PID=
+  GNOME_FILES_PID=
 }
 stop() {
 	cleanup
@@ -87,13 +134,27 @@ while :; do
       # small clipboard payloads and makes ordinary text appear stuck.
       socat -u TCP:$HOST:$PULL_PORT,connect-timeout=3 - 2>/dev/null | while IFS= read -r line; do
         line=${line%"$(printf '\r')"}
+        receive=--receive
+        case $line in
+        png:*) receive=--receive-image; line=${line#png:} ;;
+        files:*) receive=--receive-files; line=${line#files:} ;;
+        esac
         printf '%s' "$line" | base64 -d > "$STATE/incoming" 2>/dev/null || continue
-        "$0" --receive < "$STATE/incoming" || break
+        "$0" $receive < "$STATE/incoming" || break
       done
       sleep 2
     done
   ) &
   PULL_PID=$!
+
+  # guest -> host, images. wl-paste only runs the handler when the selection
+  # offers the requested type, so a text copy leaves this watcher idle.
+  wl-paste --type image/png --watch "$0" --push-image 2>/dev/null &
+  IMAGE_PID=$!
+  wl-paste --type text/uri-list --watch "$0" --push-files 2>/dev/null &
+  FILES_PID=$!
+  wl-paste --type x-special/gnome-copied-files --watch "$0" --push-files 2>/dev/null &
+  GNOME_FILES_PID=$!
 
   # guest -> host. wl-paste exits when its Wayland connection disappears, so
   # the outer loop can discover the replacement socket and restart both sides.

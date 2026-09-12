@@ -101,12 +101,21 @@ func TestGuestAgentZeroFillRoundTrip(t *testing.T) {
 	if line, err := r.ReadString('\n'); err != nil || line != "zero-fill 1024\n" {
 		t.Fatalf("guest got %q, %v", line, err)
 	}
+	if a.requestZeroFill(1024) {
+		t.Fatal("duplicate reclaim queued")
+	}
 	c.Write([]byte("zero-fill done\n"))
 	for !a.compactPending() && time.Now().Before(deadline.Add(2*time.Second)) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	if !a.compactPending() {
 		t.Fatal("zero-fill completion not recorded")
+	}
+	if a.requestZeroFill(1024) {
+		t.Fatal("reclaim repeated before compaction")
+	}
+	if !strings.Contains(a.reclaimStatus(), "Shut down") {
+		t.Fatal(a.reclaimStatus())
 	}
 }
 

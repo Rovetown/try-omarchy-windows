@@ -33,12 +33,20 @@ type clipBridge struct {
 }
 
 func (b *clipBridge) acceptPush(l net.Listener) {
+	slots := make(chan struct{}, 4)
 	for {
 		c, err := l.Accept()
 		if err != nil {
 			return
 		}
+		select {
+		case slots <- struct{}{}:
+		default:
+			c.Close()
+			continue
+		}
 		go func(c net.Conn) {
+			defer func() { <-slots }()
 			defer c.Close()
 			// A compromised or broken guest must not make the Windows launcher
 			// allocate an unbounded line. Base64 expands data by at most 4/3.
@@ -107,7 +115,7 @@ func (b *clipBridge) sendCurrentHost(conn net.Conn) {
 	}
 	line := encodeClipFrame(cur)
 
-	conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+	conn.SetWriteDeadline(time.Now().Add(20 * time.Second))
 	if n, err := conn.Write([]byte(line)); err != nil || n != len(line) {
 		if b.pullConn == conn {
 			conn.Close()

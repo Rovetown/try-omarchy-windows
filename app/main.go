@@ -667,6 +667,7 @@ func main() {
 	cmdline += fmt.Sprintf(" video=%dx%d", conW, conH)
 
 	reclaimDir.Store(&cfg.dir)
+	reclaimSupported.Store(cfg.diskFormat == "raw")
 	go runGuestAgent()
 	go runWinKeyHook()
 	go runWinKeyQmp()
@@ -955,7 +956,12 @@ func runLifecycleListener() {
 					logf("guest userspace announced ready")
 					guestReady.Store(true)
 				case "reclaim":
-					requestReclaim()
+					c.SetWriteDeadline(time.Now().Add(3 * time.Second))
+					if err := requestReclaimError(); err != nil {
+						fmt.Fprintln(c, "error: "+err.Error())
+					} else {
+						fmt.Fprintln(c, "ok: Preparing free space. Check Reclaim status in the tray before shutting down.")
+					}
 				}
 			}(c)
 		}
@@ -1025,28 +1031,29 @@ func runGuestAgent() {
 // lifecycle port.
 // reclaimDir is the data directory whose Windows drive bounds a reclaim pass.
 var reclaimDir atomic.Pointer[string]
+var reclaimSupported atomic.Bool
 
-func requestReclaim() bool {
+func requestReclaimError() error {
+	if !reclaimSupported.Load() {
+		return fmt.Errorf("Reclaim is available for standard raw disks only.")
+	}
 	dir := reclaimDir.Load()
 	a := theAgent.Load()
 	if dir == nil || a == nil {
-		return false
+		return fmt.Errorf("Omarchy is not ready. Wait for the desktop and try again.")
 	}
 	free, err := diskFreeBytes(*dir)
 	if err != nil {
-		logf("reclaim: %v", err)
-		return false
+		return fmt.Errorf("Could not check free space: %w", err)
 	}
 	budget := reclaimBudgetMiB(free)
 	if budget == 0 {
-		logf("reclaim: the Windows drive has too little free space for a pass (%s free)", formatGiB(free))
-		return false
+		return fmt.Errorf("Reclaim needs at least 4.25 GiB free on the Windows drive.")
 	}
 	if !a.requestZeroFill(budget) {
-		logf("reclaim: no guest agent connected; the guest needs the current image update")
-		return false
+		return fmt.Errorf("Reclaim was not started. %s", a.reclaimStatus())
 	}
-	return true
+	return nil
 }
 
 // compactAfterShutdown runs once the guest has powered off, when the disk is
@@ -1058,12 +1065,24 @@ func compactAfterShutdown(cfg *config) {
 	}
 	getUI().setStatus("Reclaiming disk space...")
 	logf("compact: scanning %s", cfg.disk)
+	before, beforeErr := platformAllocatedFileBytes(cfg.disk)
 	reclaimed, err := compactDisk(cfg.disk, nil)
 	if err != nil {
 		logf("compact: %v", err)
+		infoBox("Omarchy shut down, but disk space could not be reclaimed. Your files remain intact.\n\n" + err.Error())
 		return
 	}
 	logf("compact: %s of zero blocks turned back into holes", formatGiB(reclaimed))
+	after, afterErr := platformAllocatedFileBytes(cfg.disk)
+	if beforeErr == nil && afterErr == nil {
+		saved := before - after
+		if saved < 0 {
+			saved = 0
+		}
+		infoBox("Omarchy shut down. Its disk now uses " + formatGiB(saved) + " less space on Windows.")
+	} else {
+		infoBox("Omarchy shut down and disk compaction finished. Windows could not report the change in allocated space.")
+	}
 }
 
 // sendLifecycleCommand hands one line to the running launcher on loopback.
@@ -1074,6 +1093,22 @@ func sendLifecycleCommand(command string) int {
 		return 1
 	}
 	defer c.Close()
-	c.Write([]byte(command + "\n"))
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(c, command+"\n"); err != nil {
+		errorBox(err.Error())
+		return 1
+	}
+	if command == "reclaim" {
+		reply, err := bufio.NewReader(io.LimitReader(c, 4096)).ReadString('\n')
+		if err != nil {
+			errorBox("The running launcher did not confirm reclaim. It may need an update.")
+			return 1
+		}
+		if !strings.HasPrefix(reply, "ok: ") {
+			errorBox(strings.TrimSpace(strings.TrimPrefix(reply, "error: ")))
+			return 1
+		}
+		infoBox(strings.TrimSpace(strings.TrimPrefix(reply, "ok: ")))
+	}
 	return 0
 }

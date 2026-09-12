@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.17-preview
+
+- Add file and folder copy/paste between Windows and Omarchy, with bounded
+  snapshots and preserved originals.
+- Expose reclaim and its status in the tray, report rejected requests correctly,
+  and use a private temporary file during preparation.
+- Keep Settings accessible on smaller screens and add help for everyday controls.
+
+Development candidate; Windows acceptance remains pending. See
+[the combined testing checklist](docs/COMPLETION-CANDIDATE.md).
+
 ## v0.0.16-preview
 
 - Preserve native monitor settings and the Omarchy runtime location when

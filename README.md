@@ -20,6 +20,10 @@ The Omarchy mark in the app icon is sourced from the
 [official Omarchy brand kit](https://omarchy.org/brand/) and remains subject to
 Omarchy's trademark rights.
 
+The [next development candidate](docs/COMPLETION-CANDIDATE.md) adds file
+copy/paste, reclaim controls and Settings improvements. These changes are not
+in the published preview or the existing signed v16 draft.
+
 ## What works today
 
 - **The full Omarchy 4.0.2 desktop on new or reset guests**: Hyprland, the bar, notifications, all 22 themes, the screensavers. On our mid-range Ryzen 5 test laptop the desktop is up about 6 seconds after launch, and every launch after setup goes straight there. No Linux login screens, no console text, branded window.

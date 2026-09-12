@@ -1,0 +1,465 @@
+From 18eff9cb02fdcbb3684fef3828f45a1a5384c655 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 14:46:55 -0400
+Subject: [PATCH] Bridge bounded file clipboard snapshots and preserve
+ originals
+
+---
+ .../usr/local/bin/clipboard-bridge            |  39 +++-
+ .../usr/local/bin/clipboard-files             | 215 ++++++++++++++++++
+ guest/scripts/finalize-rootfs.sh              |   3 +-
+ guest/tests/test_clipboard_files.py           |  84 +++++++
+ guest/tests/verify.py                         |   2 +-
+ 5 files changed, 337 insertions(+), 6 deletions(-)
+ create mode 100755 guest/factory-overlay/usr/local/bin/clipboard-files
+ create mode 100644 guest/tests/test_clipboard_files.py
+
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-bridge b/guest/factory-overlay/usr/local/bin/clipboard-bridge
+index 2fb1cb2..5c0bf38 100755
+--- a/guest/factory-overlay/usr/local/bin/clipboard-bridge
++++ b/guest/factory-overlay/usr/local/bin/clipboard-bridge
+@@ -18,11 +18,14 @@ mkdir -p "$STATE"
+ # wl-paste supplies the selected text on stdin. Keeping it in a file preserves
+ # trailing newlines and avoids a second clipboard read after the selection moves.
+ case "${1:-}" in
+---push|--receive|--push-image|--receive-image)
++--push|--receive|--push-image|--receive-image|--push-files|--receive-files)
++  # URI selections belong to the file watcher, never the text bridge.
++  if [ "$1" = --push ] && wl-paste --list-types 2>/dev/null | grep -Eq '^(text/uri-list|x-special/gnome-copied-files)$'; then exit 0; fi
+   kind=text
+   limit=$TEXT_LIMIT
+   case $1 in
+   --push-image|--receive-image) kind=png; limit=$IMAGE_LIMIT ;;
++  --push-files|--receive-files) kind=files; limit=$IMAGE_LIMIT ;;
+   esac
+   outgoing=$(mktemp "$STATE/outgoing.XXXXXX") || exit 1
+   trap 'rm -f "$outgoing"' EXIT
+@@ -33,12 +36,30 @@ case "${1:-}" in
+   # overwrite the state of a newer host value received while it was sending.
+   exec 9> "$STATE/lock"
+   flock -x 9 || exit 1
++  if [ "$1" = --push-files ]; then
++    clipboard-files pack < "$outgoing" > "$outgoing.zip" || { rm -f "$outgoing.zip"; exit 1; }
++    mv "$outgoing.zip" "$outgoing" || exit 1
++  fi
+   sha=$(sha256sum < "$outgoing" | cut -d' ' -f1)
+   case $1 in
+-  --receive|--receive-image)
++  --receive|--receive-image|--receive-files)
+     printf '%s\n' "$sha" > "$STATE/last_content"
+     # wl-copy forks a clipboard owner. It must not inherit the lock descriptor.
+-    if [ "$kind" = png ]; then
++    if [ "$kind" = files ]; then
++      clipboard-files unpack < "$outgoing" > "$outgoing.uris" || { rm -f "$outgoing.uris" "$STATE/last_content"; exit 1; }
++      # Hash our local snapshot representation to suppress the file watcher echo.
++      if ! clipboard-files pack < "$outgoing.uris" > "$outgoing.zip"; then
++        clipboard-files discard < "$outgoing.uris" || true
++        rm -f "$outgoing.uris" "$outgoing.zip" "$STATE/last_content"; exit 1
++      fi
++      sha256sum < "$outgoing.zip" | cut -d' ' -f1 > "$STATE/last_content"
++      rm -f "$outgoing.zip"
++      wl-copy --type text/uri-list < "$outgoing.uris" 9>&-
++      result=$?
++      if [ "$result" -ne 0 ]; then clipboard-files discard < "$outgoing.uris" || true; fi
++      rm -f "$outgoing.uris"
++      [ "$result" -eq 0 ]
++    elif [ "$kind" = png ]; then
+       wl-copy --type image/png < "$outgoing" 9>&-
+     else
+       wl-copy < "$outgoing" 9>&-
+@@ -52,6 +73,7 @@ case "${1:-}" in
+   [ "$sha" = "$(cat "$STATE/last_content" 2>/dev/null)" ] && exit 0
+   prefix=""
+   [ "$kind" = png ] && prefix="png:"
++  [ "$kind" = files ] && prefix="files:"
+   if { printf '%s' "$prefix"; base64 -w0 < "$outgoing"; echo; } | timeout 20s socat -u - TCP:$HOST:$PUSH_PORT,connect-timeout=3 2>/dev/null 9>&-; then
+     printf '%s\n' "$sha" > "$STATE/last_content"
+   else
+@@ -78,15 +100,19 @@ find_wayland() {
+ 
+ PULL_PID=
+ IMAGE_PID=
++FILES_PID=
++GNOME_FILES_PID=
+ cleanup() {
+ 	pull_pid=$PULL_PID
+ 	image_pid=$IMAGE_PID
+ 	PULL_PID=
+ 	IMAGE_PID=
+-	for pid in $pull_pid $image_pid; do
++	for pid in $pull_pid $image_pid $FILES_PID $GNOME_FILES_PID; do
+ 		kill "$pid" 2>/dev/null || true
+ 		wait "$pid" 2>/dev/null || true
+ 	done
++  FILES_PID=
++  GNOME_FILES_PID=
+ }
+ stop() {
+ 	cleanup
+@@ -111,6 +137,7 @@ while :; do
+         receive=--receive
+         case $line in
+         png:*) receive=--receive-image; line=${line#png:} ;;
++        files:*) receive=--receive-files; line=${line#files:} ;;
+         esac
+         printf '%s' "$line" | base64 -d > "$STATE/incoming" 2>/dev/null || continue
+         "$0" $receive < "$STATE/incoming" || break
+@@ -124,6 +151,10 @@ while :; do
+   # offers the requested type, so a text copy leaves this watcher idle.
+   wl-paste --type image/png --watch "$0" --push-image 2>/dev/null &
+   IMAGE_PID=$!
++  wl-paste --type text/uri-list --watch "$0" --push-files 2>/dev/null &
++  FILES_PID=$!
++  wl-paste --type x-special/gnome-copied-files --watch "$0" --push-files 2>/dev/null &
++  GNOME_FILES_PID=$!
+ 
+   # guest -> host. wl-paste exits when its Wayland connection disappears, so
+   # the outer loop can discover the replacement socket and restart both sides.
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-files b/guest/factory-overlay/usr/local/bin/clipboard-files
+new file mode 100755
+index 0000000..d7134b8
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/bin/clipboard-files
+@@ -0,0 +1,215 @@
++#!/usr/bin/env python3
++"""Bounded clipboard file snapshots. No links, overwrite, extraction outside cache, or moves."""
++import io
++import os
++from pathlib import Path, PurePosixPath
++import shutil
++import stat
++import sys
++import tempfile
++import urllib.parse
++import zipfile
++import zlib
++
++ARCHIVE_LIMIT = 16 << 20
++FILE_LIMIT = 64 << 20
++ENTRY_LIMIT = 1024
++CACHE_LIMIT = 256 << 20
++
++
++def valid_name(name):
++    if not name or len(name.encode()) > 1024 or name.startswith('/') or any(c in name for c in '\\:\x00\r\n'):
++        return False
++    for part in name.rstrip('/').split('/'):
++        if not part or part in ('.', '..') or part.rstrip(' .') != part or any(ord(c) < 32 or c in '<>"|?*' for c in part):
++            return False
++        stem = part.split('.')[0].upper()
++        if stem in ('CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$') or (len(stem) == 4 and stem[:3] in ('COM', 'LPT') and stem[3] in '0123456789'):
++            return False
++    return True
++
++
++def inspect(data):
++    if not data or len(data) > ARCHIVE_LIMIT:
++        raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
++    archive = zipfile.ZipFile(io.BytesIO(data))
++    entries = archive.infolist()
++    if not 0 < len(entries) <= ENTRY_LIMIT:
++        raise ValueError('Too many clipboard entries')
++    seen = {}
++    spelling = {}
++    total = 0
++    for entry in entries:
++        mode = entry.external_attr >> 16
++        if not valid_name(entry.filename) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)) or entry.flag_bits & 1:
++            raise ValueError('Unsupported clipboard name or type')
++        name = entry.filename.rstrip('/')
++        for prefix in (PurePosixPath(name), *PurePosixPath(name).parents):
++            if str(prefix) == '.':
++                continue
++            key = str(prefix).lower()
++            if key in spelling and spelling[key] != str(prefix):
++                raise ValueError('Clipboard directory names differ only by case')
++            spelling[key] = str(prefix)
++        key = entry.filename.rstrip('/').lower()
++        if key in seen:
++            raise ValueError('Duplicate clipboard name')
++        seen[key] = entry.is_dir()
++        total += entry.file_size
++        if total > FILE_LIMIT:
++            raise ValueError('Clipboard files exceed 64 MiB')
++    for name in seen:
++        for parent in PurePosixPath(name).parents:
++            if str(parent) != '.' and (str(parent) not in seen or not seen[str(parent)]):
++                raise ValueError('File used as directory')
++    return archive
++
++
++class BoundedBuffer(io.BytesIO):
++    def write(self, data):
++        if self.tell() + len(data) > ARCHIVE_LIMIT:
++            raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
++        return super().write(data)
++
++
++def uri_paths(data):
++    lines = data.decode('utf-8', errors='strict').splitlines()
++    if lines and lines[0] in ('copy', 'cut'):
++        lines = lines[1:]  # A cut is always a copy across the bridge.
++    paths = []
++    for line in lines:
++        if not line or line.startswith('#'):
++            continue
++        uri = urllib.parse.urlsplit(line)
++        if uri.scheme != 'file' or uri.netloc not in ('', 'localhost') or uri.query or uri.fragment:
++            raise ValueError('Only local files can be copied')
++        name = urllib.parse.unquote(uri.path, errors='strict')
++        if not name.startswith('/') or '\x00' in name:
++            raise ValueError('Invalid file URI')
++        paths.append(Path(name))
++    if not 0 < len(paths) <= ENTRY_LIMIT:
++        raise ValueError('Clipboard selection is empty or too large')
++    return paths
++
++
++def pack(data):
++    output = BoundedBuffer()
++    total = 0
++    count = 0
++    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
++        def add(parent_fd, filename, name):
++            nonlocal total, count
++            count += 1
++            if count > ENTRY_LIMIT or not valid_name(name):
++                raise ValueError('Too many entries or unsupported file name')
++            info = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
++            if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
++                raise ValueError('Links and special files must use the shared folder')
++            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
++            if stat.S_ISDIR(info.st_mode):
++                flags |= os.O_DIRECTORY
++            fd = os.open(filename, flags, dir_fd=parent_fd)
++            try:
++                actual = os.fstat(fd)
++                if (actual.st_dev, actual.st_ino, stat.S_IFMT(actual.st_mode)) != (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)):
++                    raise ValueError('Clipboard source changed')
++                entry = zipfile.ZipInfo(name + ('/' if stat.S_ISDIR(info.st_mode) else ''))
++                entry.create_system = 3
++                entry.external_attr = ((stat.S_IFDIR | 0o700) if stat.S_ISDIR(info.st_mode) else (stat.S_IFREG | 0o600)) << 16
++                entry.compress_type = zipfile.ZIP_DEFLATED
++                if stat.S_ISDIR(info.st_mode):
++                    archive.writestr(entry, b'')
++                    for child in sorted(os.listdir(fd)):
++                        add(fd, child, name + '/' + child)
++                else:
++                    with archive.open(entry, 'w') as dest:
++                        while chunk := os.read(fd, min(65536, FILE_LIMIT - total + 1)):
++                            total += len(chunk)
++                            if total > FILE_LIMIT:
++                                raise ValueError('Clipboard files exceed 64 MiB')
++                            dest.write(chunk)
++            finally:
++                os.close(fd)
++        for source in uri_paths(data):
++            parent_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY)
++            try:
++                add(parent_fd, source.name, source.name)
++            finally:
++                os.close(parent_fd)
++    result = output.getvalue()
++    inspect(result)
++    return result
++
++
++def unpack(data, cache):
++    archive = inspect(data)
++    cache = Path(cache)
++    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
++    if cache.is_symlink():
++        raise ValueError('Clipboard cache is a link')
++    used = 0
++    count = 0
++    for root, dirs, files in os.walk(cache, followlinks=False):
++        for name in dirs + files:
++            p = Path(root) / name
++            if p.is_symlink():
++                raise ValueError('Clipboard cache contains a link')
++            count += 1
++            if count > 16384:
++                raise ValueError('Clipboard cache is full; remove old copies')
++        used += sum((Path(root) / name).stat().st_size for name in files)
++        if used > CACHE_LIMIT:
++            raise ValueError('Clipboard cache is full; remove old copies')
++    if count + len(archive.infolist()) + 1 > 16384 or used + sum(e.file_size for e in archive.infolist()) > CACHE_LIMIT:
++        raise ValueError('Clipboard cache is full; remove old copies')
++    folder = Path(tempfile.mkdtemp(prefix='copy-', dir=cache))
++    roots = []
++    try:
++        for entry in archive.infolist():
++            target = folder / entry.filename
++            top = folder / entry.filename.split('/')[0]
++            if top not in roots:
++                roots.append(top)
++            if entry.is_dir():
++                target.mkdir(mode=0o700, parents=True, exist_ok=True)
++            else:
++                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
++                with archive.open(entry) as stream, target.open('xb') as dest:
++                    remaining = entry.file_size
++                    while chunk := stream.read(min(65536, remaining + 1)):
++                        remaining -= len(chunk)
++                        if remaining < 0:
++                            raise ValueError('Clipboard size mismatch')
++                        dest.write(chunk)
++                    if remaining != 0:
++                        raise ValueError('Clipboard size mismatch')
++        return ''.join(p.as_uri() + '\r\n' for p in roots).encode()
++    except BaseException:
++        shutil.rmtree(folder)
++        raise
++
++
++def discard(data, cache):
++    paths = uri_paths(data)
++    folder = paths[0].parent
++    if any(p.parent != folder for p in paths) or folder.parent != Path(cache) or not folder.name.startswith('copy-') or folder.is_symlink():
++        raise ValueError('Not a clipboard snapshot')
++    shutil.rmtree(folder)
++
++
++if __name__ == '__main__':
++    try:
++        data = sys.stdin.buffer.read(ARCHIVE_LIMIT + 1)
++        if sys.argv[1] == 'pack':
++            result = pack(data)
++        elif sys.argv[1] == 'unpack':
++            result = unpack(data, Path.home() / '.cache/try-omarchy/clipboard-files')
++        elif sys.argv[1] == 'discard':
++            discard(data, Path.home() / '.cache/try-omarchy/clipboard-files')
++            result = b''
++        else:
++            raise ValueError('Unknown command')
++        sys.stdout.buffer.write(result)
++    except (ValueError, OSError, zipfile.BadZipFile, zlib.error, UnicodeError) as error:
++        print(f'File clipboard: {error}', file=sys.stderr)
++        sys.exit(1)
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index c55ffa4..7aa9a6d 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -94,6 +94,7 @@ compat_paths=(
+   etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf
+   etc/systemd/user/graphical-session.target.wants/clipboard-bridge.service
+   usr/local/bin/clipboard-bridge
++  usr/local/bin/clipboard-files
+   etc/systemd/system/try-omarchy-ready.service
+   etc/systemd/system/multi-user.target.wants/try-omarchy-ready.service
+   etc/systemd/system/try-omarchy-sshd.service
+@@ -126,7 +127,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=17
++compat_revision=18
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/tests/test_clipboard_files.py b/guest/tests/test_clipboard_files.py
+new file mode 100644
+index 0000000..942ade5
+--- /dev/null
++++ b/guest/tests/test_clipboard_files.py
+@@ -0,0 +1,84 @@
++import importlib.machinery
++import io
++import os
++from pathlib import Path
++import tempfile
++import unittest
++import zipfile
++import zlib
++
++HELPER = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/bin/clipboard-files'
++files = importlib.machinery.SourceFileLoader('clipboard_files', str(HELPER)).load_module()
++
++class FileClipboardTests(unittest.TestCase):
++    def test_roundtrip_and_cut_preserves_source(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            source = root / 'hello 世界.txt'
++            source.write_bytes(b'hello\0binary')
++            data = files.pack(('cut\n' + source.as_uri() + '\n').encode())
++            uris = files.unpack(data, root / 'cache')
++            result = files.uri_paths(uris)[0]
++            self.assertEqual(result.read_bytes(), source.read_bytes())
++            self.assertTrue(source.exists())
++            files.discard(uris, root / 'cache')
++            self.assertFalse(result.exists())
++            self.assertTrue(source.exists())
++
++    def test_reject_names_and_collisions(self):
++        for names in [['../file'], ['NUL.txt'], ['x:stream'], ['A/x', 'a/y'], ['a','a/x'], ['same', 'same']]:
++            with self.subTest(names=names):
++                data = io.BytesIO()
++                with zipfile.ZipFile(data, 'w') as archive:
++                    for name in names:
++                        archive.writestr(name, b'hello')
++                with self.assertRaises(ValueError):
++                    files.inspect(data.getvalue())
++
++    def test_links_are_not_followed(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            (root/'original').write_text('secret')
++            (root/'link').symlink_to(root/'original')
++            with self.assertRaises(ValueError):
++                files.pack(((root/'link').as_uri()+'\n').encode())
++
++    def test_remote_uris_rejected(self):
++        for uri in [b'file://server/share/file', b'https://example.com/file', b'file:///tmp/file%00suffix', b'']:
++            with self.assertRaises(ValueError):
++                files.uri_paths(uri)
++
++    def test_corruption_removes_staging(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root=Path(tmp); source=root/'file';source.write_text('hello')
++            data=bytearray(files.pack((source.as_uri()+'\n').encode()))
++            with zipfile.ZipFile(io.BytesIO(data)) as archive:
++                entry=archive.infolist()[0]
++                pos=entry.header_offset+30+len(entry.filename.encode())+len(entry.extra)
++            data[pos] ^= 255
++            with self.assertRaises((zipfile.BadZipFile, ValueError, zlib.error)):
++                files.unpack(data, root/'cache')
++            self.assertEqual(list((root/'cache').iterdir()), [])
++
++    def test_bridge_suppresses_echo_and_cleans_failed_publish(self):
++        import subprocess
++        with tempfile.TemporaryDirectory() as tmp:
++            root=Path(tmp); bindir=root/'bin';bindir.mkdir()
++            (bindir/'clipboard-files').symlink_to(HELPER)
++            capture=root/'clipboard'
++            copy=bindir/'wl-copy';copy.write_text('#!/bin/sh\ncat > "$CAPTURE"\n');copy.chmod(0o755)
++            source=root/'source';source.write_text('hello')
++            payload=files.pack((source.as_uri()+'\n').encode())
++            env=dict(os.environ, HOME=str(root), XDG_RUNTIME_DIR=str(root/'runtime'), CAPTURE=str(capture), PATH=str(bindir)+os.pathsep+os.environ['PATH'])
++            bridge=HELPER.with_name('clipboard-bridge')
++            received=subprocess.run(['sh',str(bridge),'--receive-files'],input=payload,env=env,capture_output=True)
++            self.assertEqual(received.returncode,0,received.stderr)
++            uris=capture.read_bytes()
++            push=subprocess.run(['sh',str(bridge),'--push-files'],input=uris,env=env,capture_output=True)
++            self.assertEqual(push.returncode,0,push.stderr)  # no socat required for an echo
++            cache=root/'.cache/try-omarchy/clipboard-files'
++            before=set(cache.iterdir())
++            copy.write_text('#!/bin/sh\nexit 1\n')
++            received=subprocess.run(['sh',str(bridge),'--receive-files'],input=payload,env=env,capture_output=True)
++            self.assertNotEqual(received.returncode,0)
++            self.assertEqual(set(cache.iterdir()),before)
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index 44f6bcf..aeca96d 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=17" in finalize_rootfs
++        "compat_revision=18" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+-- 
+2.55.0
+

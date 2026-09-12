@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""Bounded clipboard file snapshots. No links, overwrite, extraction outside cache, or moves."""
+import io
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+import zipfile
+import zlib
+
+ARCHIVE_LIMIT = 16 << 20
+FILE_LIMIT = 64 << 20
+ENTRY_LIMIT = 1024
+CACHE_LIMIT = 256 << 20
+
+
+def valid_name(name):
+    if not name or len(name.encode()) > 1024 or name.startswith('/') or any(c in name for c in '\\:\x00\r\n'):
+        return False
+    for part in name.rstrip('/').split('/'):
+        if not part or part in ('.', '..') or part.rstrip(' .') != part or any(ord(c) < 32 or c in '<>"|?*' for c in part):
+            return False
+        stem = part.split('.')[0].upper()
+        if stem in ('CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$') or (len(stem) == 4 and stem[:3] in ('COM', 'LPT') and stem[3] in '0123456789'):
+            return False
+    return True
+
+
+def inspect(data):
+    if not data or len(data) > ARCHIVE_LIMIT:
+        raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    entries = archive.infolist()
+    if not 0 < len(entries) <= ENTRY_LIMIT:
+        raise ValueError('Too many clipboard entries')
+    seen = {}
+    spelling = {}
+    total = 0
+    for entry in entries:
+        mode = entry.external_attr >> 16
+        if not valid_name(entry.filename) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)) or entry.flag_bits & 1:
+            raise ValueError('Unsupported clipboard name or type')
+        name = entry.filename.rstrip('/')
+        for prefix in (PurePosixPath(name), *PurePosixPath(name).parents):
+            if str(prefix) == '.':
+                continue
+            key = str(prefix).lower()
+            if key in spelling and spelling[key] != str(prefix):
+                raise ValueError('Clipboard directory names differ only by case')
+            spelling[key] = str(prefix)
+        key = entry.filename.rstrip('/').lower()
+        if key in seen:
+            raise ValueError('Duplicate clipboard name')
+        seen[key] = entry.is_dir()
+        total += entry.file_size
+        if total > FILE_LIMIT:
+            raise ValueError('Clipboard files exceed 64 MiB')
+    for name in seen:
+        for parent in PurePosixPath(name).parents:
+            if str(parent) != '.' and (str(parent) not in seen or not seen[str(parent)]):
+                raise ValueError('File used as directory')
+    return archive
+
+
+class BoundedBuffer(io.BytesIO):
+    def write(self, data):
+        if self.tell() + len(data) > ARCHIVE_LIMIT:
+            raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
+        return super().write(data)
+
+
+def uri_paths(data):
+    lines = data.decode('utf-8', errors='strict').splitlines()
+    if lines and lines[0] in ('copy', 'cut'):
+        lines = lines[1:]  # A cut is always a copy across the bridge.
+    paths = []
+    for line in lines:
+        if not line or line.startswith('#'):
+            continue
+        uri = urllib.parse.urlsplit(line)
+        if uri.scheme != 'file' or uri.netloc not in ('', 'localhost') or uri.query or uri.fragment:
+            raise ValueError('Only local files can be copied')
+        name = urllib.parse.unquote(uri.path, errors='strict')
+        if not name.startswith('/') or '\x00' in name:
+            raise ValueError('Invalid file URI')
+        paths.append(Path(name))
+    if not 0 < len(paths) <= ENTRY_LIMIT:
+        raise ValueError('Clipboard selection is empty or too large')
+    return paths
+
+
+def pack(data):
+    output = BoundedBuffer()
+    total = 0
+    count = 0
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        def add(parent_fd, filename, name):
+            nonlocal total, count
+            count += 1
+            if count > ENTRY_LIMIT or not valid_name(name):
+                raise ValueError('Too many entries or unsupported file name')
+            info = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+            if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                raise ValueError('Links and special files must use the shared folder')
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if stat.S_ISDIR(info.st_mode):
+                flags |= os.O_DIRECTORY
+            fd = os.open(filename, flags, dir_fd=parent_fd)
+            try:
+                actual = os.fstat(fd)
+                if (actual.st_dev, actual.st_ino, stat.S_IFMT(actual.st_mode)) != (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)):
+                    raise ValueError('Clipboard source changed')
+                entry = zipfile.ZipInfo(name + ('/' if stat.S_ISDIR(info.st_mode) else ''))
+                entry.create_system = 3
+                entry.external_attr = ((stat.S_IFDIR | 0o700) if stat.S_ISDIR(info.st_mode) else (stat.S_IFREG | 0o600)) << 16
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                if stat.S_ISDIR(info.st_mode):
+                    archive.writestr(entry, b'')
+                    for child in sorted(os.listdir(fd)):
+                        add(fd, child, name + '/' + child)
+                else:
+                    with archive.open(entry, 'w') as dest:
+                        while chunk := os.read(fd, min(65536, FILE_LIMIT - total + 1)):
+                            total += len(chunk)
+                            if total > FILE_LIMIT:
+                                raise ValueError('Clipboard files exceed 64 MiB')
+                            dest.write(chunk)
+            finally:
+                os.close(fd)
+        for source in uri_paths(data):
+            parent_fd = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                add(parent_fd, source.name, source.name)
+            finally:
+                os.close(parent_fd)
+    result = output.getvalue()
+    inspect(result)
+    return result
+
+
+def unpack(data, cache):
+    archive = inspect(data)
+    cache = Path(cache)
+    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if cache.is_symlink():
+        raise ValueError('Clipboard cache is a link')
+    used = 0
+    count = 0
+    for root, dirs, files in os.walk(cache, followlinks=False):
+        for name in dirs + files:
+            p = Path(root) / name
+            if p.is_symlink():
+                raise ValueError('Clipboard cache contains a link')
+            count += 1
+            if count > 16384:
+                raise ValueError('Clipboard cache is full; remove old copies')
+        used += sum((Path(root) / name).stat().st_size for name in files)
+        if used > CACHE_LIMIT:
+            raise ValueError('Clipboard cache is full; remove old copies')
+    if count + len(archive.infolist()) + 1 > 16384 or used + sum(e.file_size for e in archive.infolist()) > CACHE_LIMIT:
+        raise ValueError('Clipboard cache is full; remove old copies')
+    folder = Path(tempfile.mkdtemp(prefix='copy-', dir=cache))
+    roots = []
+    try:
+        for entry in archive.infolist():
+            target = folder / entry.filename
+            top = folder / entry.filename.split('/')[0]
+            if top not in roots:
+                roots.append(top)
+            if entry.is_dir():
+                target.mkdir(mode=0o700, parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                with archive.open(entry) as stream, target.open('xb') as dest:
+                    remaining = entry.file_size
+                    while chunk := stream.read(min(65536, remaining + 1)):
+                        remaining -= len(chunk)
+                        if remaining < 0:
+                            raise ValueError('Clipboard size mismatch')
+                        dest.write(chunk)
+                    if remaining != 0:
+                        raise ValueError('Clipboard size mismatch')
+        return ''.join(p.as_uri() + '\r\n' for p in roots).encode()
+    except BaseException:
+        shutil.rmtree(folder)
+        raise
+
+
+def discard(data, cache):
+    paths = uri_paths(data)
+    folder = paths[0].parent
+    if any(p.parent != folder for p in paths) or folder.parent != Path(cache) or not folder.name.startswith('copy-') or folder.is_symlink():
+        raise ValueError('Not a clipboard snapshot')
+    shutil.rmtree(folder)
+
+
+if __name__ == '__main__':
+    try:
+        data = sys.stdin.buffer.read(ARCHIVE_LIMIT + 1)
+        if sys.argv[1] == 'pack':
+            result = pack(data)
+        elif sys.argv[1] == 'unpack':
+            result = unpack(data, Path.home() / '.cache/try-omarchy/clipboard-files')
+        elif sys.argv[1] == 'discard':
+            discard(data, Path.home() / '.cache/try-omarchy/clipboard-files')
+            result = b''
+        else:
+            raise ValueError('Unknown command')
+        sys.stdout.buffer.write(result)
+    except (ValueError, OSError, zipfile.BadZipFile, zlib.error, UnicodeError) as error:
+        print(f'File clipboard: {error}', file=sys.stderr)
+        if shutil.which('notify-send') and os.environ.get('WAYLAND_DISPLAY'):
+            try:
+                subprocess.run(['notify-send', '-a', 'Try Omarchy', 'Files were not transferred', str(error)], timeout=3, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        sys.exit(1)

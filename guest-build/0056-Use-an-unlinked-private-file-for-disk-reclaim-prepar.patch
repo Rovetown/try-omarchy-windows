@@ -1,0 +1,78 @@
+From f36d47d2690322c0cd6f3ea3c25ce65cd1fa6de7 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 14:49:01 -0400
+Subject: [PATCH] Use an unlinked private file for disk reclaim preparation
+
+---
+ .../usr/local/lib/try-omarchy/agent           | 20 +++++++++++++------
+ guest/tests/test_overlay_scripts.py           |  6 ++++--
+ 2 files changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/agent b/guest/factory-overlay/usr/local/lib/try-omarchy/agent
+index b3dc207..9e6b10b 100755
+--- a/guest/factory-overlay/usr/local/lib/try-omarchy/agent
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/agent
+@@ -25,7 +25,7 @@ reply() {
+ # reserve, then deletes them. Freed blocks are zero afterwards, so the Windows
+ # launcher can turn them back into holes in disk.raw once the guest is off.
+ zero_fill() {
+-  local budget_mib=$1 avail_mib count fill_file
++  local budget_mib=$1 avail_mib count fill_file fill_fd
+   [[ $budget_mib =~ ^[0-9]{1,7}$ ]] || { reply "zero-fill failed bad budget"; return 0; }
+   avail_mib=$(df --output=avail -m "$fill_dir" 2>/dev/null | tail -1 | tr -d ' ')
+   [[ $avail_mib =~ ^[0-9]+$ ]] || { reply "zero-fill failed no free space figure"; return 0; }
+@@ -35,15 +35,23 @@ zero_fill() {
+   fi
+   count=$((avail_mib - fill_reserve_mib))
+   ((count > budget_mib)) && count=$budget_mib
+-  fill_file="$fill_dir/try-omarchy-zero-fill"
+-  rm -f "$fill_file"
+-  if dd if=/dev/zero of="$fill_file" bs=1M count="$count" status=none 2>/dev/null; then
++  # Use a private inode, then unlink it before writing. A stopped or killed
++  # agent cannot leave a multi-GiB filler behind, and an existing file or link
++  # with the old fixed name is never touched.
++  fill_file=$(mktemp "$fill_dir/try-omarchy-zero-fill.XXXXXX") || { reply "zero-fill failed creating temporary file"; return 0; }
++  if ! exec {fill_fd}>"$fill_file"; then
++    rm -f -- "$fill_file"
++    reply "zero-fill failed opening temporary file"
++    return 0
++  fi
++  rm -f -- "$fill_file"
++  if dd if=/dev/zero bs=1M count="$count" status=none >&"$fill_fd" 2>/dev/null; then
+     sync
+-    rm -f "$fill_file"
++    exec {fill_fd}>&-
+     sync
+     reply "zero-fill done"
+   else
+-    rm -f "$fill_file"
++    exec {fill_fd}>&-
+     reply "zero-fill failed writing zeros"
+   fi
+ }
+diff --git a/guest/tests/test_overlay_scripts.py b/guest/tests/test_overlay_scripts.py
+index 3cfbe65..0ecfda5 100644
+--- a/guest/tests/test_overlay_scripts.py
++++ b/guest/tests/test_overlay_scripts.py
+@@ -528,14 +528,16 @@ class AgentTests(OverlayCase):
+         fill_dir = self.root / "fill"
+         fill_dir.mkdir()
+         self.fake("df", 'echo "Avail"; echo " 2048"')
+-        self.fake("dd", 'echo "dd $@" >> "$CALLS"; touch "$FILL/try-omarchy-zero-fill"')
++        (fill_dir / "try-omarchy-zero-fill").write_text("keep me")
++        self.fake("dd", 'echo "dd $@" >> "$CALLS"; printf zeros')
+         self.fake("sync", "true")
+         result = subprocess.run([str(AGENT), "--handle"], input="zero-fill 1000\n",
+                                 env=dict(self.env, CALLS=str(self.log), FILL=str(fill_dir), TRY_OMARCHY_FILL_DIR=str(fill_dir)),
+                                 capture_output=True, text=True, timeout=30)
+         self.assertEqual(result.returncode, 0, result.stderr)
+         self.assertIn("count=1000", self.calls())
+-        self.assertFalse((fill_dir / "try-omarchy-zero-fill").exists())
++        self.assertEqual((fill_dir / "try-omarchy-zero-fill").read_text(), "keep me")
++        self.assertEqual(len(list(fill_dir.iterdir())), 1)
+         self.assertEqual(result.stdout.strip(), "zero-fill done")
+ 
+     def test_zero_fill_refuses_when_the_disk_is_nearly_full(self) -> None:
+-- 
+2.55.0
+

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"runtime"
 	"syscall"
 	"time"
 	"unsafe"
@@ -343,6 +344,11 @@ func clipboardSequence() uint32 {
 // clipboardGetItem reads the Windows clipboard as text when text is offered,
 // otherwise as a PNG image from the registered PNG format or a DIB.
 func clipboardGetItem() (clipItem, bool) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if r, _, _ := procIsClipboardFormatAvail.Call(cfHDrop); r != 0 {
+		return clipboardGetFiles()
+	}
 	if text, ok := clipboardGetText(); ok {
 		return textItem(text), true
 	}
@@ -400,6 +406,11 @@ func clipboardGlobalBytes(format uintptr, limit int) ([]byte, bool) {
 }
 
 func clipboardSetItem(item clipItem) bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if item.Kind == clipFiles {
+		return clipboardSetFiles(item)
+	}
 	if item.Kind == clipText {
 		return clipboardSetText(string(item.Data))
 	}

@@ -69,6 +69,7 @@ const (
 	settingsUninstallID   = 2027
 	settingsMoveID        = 2028
 	settingsMoveCleanupID = 2029
+	settingsHelpID        = 2030
 	bsAutoradiobutton     = 0x0009
 	wsGroup               = 0x00020000
 	settingsRecoveryDone  = 0x8010
@@ -122,6 +123,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	hInst, _, _ := procGetModuleHandleW.Call(0)
 	className, _ := syscall.UTF16PtrFromString("TryOmarchySettings")
 	var hwnd uintptr
+	var scroll settingsScroll
 	var hFull, hMem, hCPUs, hDisk, hShare, hShareOn, hFwd, hKey uintptr
 	var hRenderAuto, hRenderGPU, hRenderCPU uintptr
 
@@ -172,9 +174,14 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	}
 
 	wndProc := syscall.NewCallback(func(h, msg, wParam, lParam uintptr) uintptr {
+		if scroll.handle(msg, wParam) {
+			return 0
+		}
 		switch msg {
 		case wmCommand:
 			switch wParam & 0xffff {
+			case settingsHelpID:
+				infoBox(everydayHelp)
 			case settingsSaveID:
 				guard, err := lockMoveStore(hostMoveStore())
 				if err != nil {
@@ -277,22 +284,32 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		return false
 	}
 
-	const clientW, clientH = 480, 682
+	const clientW, clientH = 480, 714
 	rect := [4]int32{0, 0, clientW, clientH}
-	style := uintptr(wsCaption | wsSysmenu)
+	style := uintptr(wsCaption | wsSysmenu | wsVscroll)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rect[0])), style, 0, 0)
 	w, hgt := rect[2]-rect[0], rect[3]-rect[1]
 	sx, _, _ := procGetSystemMetrics.Call(smCxscreen)
 	sy, _, _ := procGetSystemMetrics.Call(smCyscreen)
+	work := [4]int32{0, 0, int32(sx), int32(sy)}
+	procSystemParametersInfoW.Call(0x30, 0, uintptr(unsafe.Pointer(&work[0])), 0)
+	if available := work[3] - work[1] - 16; hgt > available {
+		hgt = available
+	}
+	scroll.height = hgt - (rect[3] - rect[1] - clientH)
+	scroll.content = clientH
+	x := work[0] + (work[2]-work[0]-w)/2
+	yWindow := work[1] + (work[3]-work[1]-hgt)/2
 	title, _ := syscall.UTF16PtrFromString(appTitle + " settings")
 	var err2 error
 	hwnd, _, err2 = procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)),
-		style|wsVisible, (sx-uintptr(w))/2, (sy-uintptr(hgt))/2, uintptr(w), uintptr(hgt), 0, 0, hInst, 0)
+		style|wsVisible, uintptr(x), uintptr(yWindow), uintptr(w), uintptr(hgt), 0, 0, hInst, 0)
 	if hwnd == 0 {
 		logf("settings: CreateWindowExW failed: %v", err2)
 		return false
 	}
 
+	scroll.window = hwnd
 	font, _, _ := procGetStockObject.Call(defaultGuiFont)
 	mk := func(class, label string, x, y, cx, cy int32, style, id uintptr) uintptr {
 		c, _ := syscall.UTF16PtrFromString(class)
@@ -300,6 +317,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		h, _, _ := procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(c)), uintptr(unsafe.Pointer(t)),
 			wsChild|wsVisible|style, uintptr(x), uintptr(y), uintptr(cx), uintptr(cy), hwnd, id, hInst, 0)
 		procSendMessageW.Call(h, wmSetfont, font, 1)
+		scroll.controls = append(scroll.controls, settingsScrollControl{h, x, y, cx, cy})
 		return h
 	}
 	const left, labelW, fieldX, fieldW = 16, 150, 170, 294
@@ -322,8 +340,8 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		procSendMessageW.Call(hRenderAuto, bmSetcheck, bstChecked, 0)
 	}
 	y += 24
-	mk("STATIC", "Automatic tries the GPU and remembers when this PC cannot use it. GPU retries every launch.", left, y, clientW-2*left, 20, ssNoprefix, 0)
-	y += 28
+	mk("STATIC", "Automatic tries the GPU and remembers when this PC cannot use it. GPU retries every launch.", left, y, clientW-2*left, 36, ssNoprefix, 0)
+	y += 44
 	mk("STATIC", "Guest memory (MiB)", left, y+3, labelW, 20, ssNoprefix, 0)
 	hMem = mk("EDIT", strconv.Itoa(current.MemoryMiB), fieldX, y, 100, 24, wsBorder|wsTabstop|esAutohscroll, settingsMemID)
 	mk("STATIC", "0 = automatic", fieldX+112, y+3, fieldW-112, 20, ssNoprefix, 0)
@@ -397,8 +415,8 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	if portable {
 		help = "Backup and recovery controls are available for standard installs."
 	}
-	mk("STATIC", help, left, y, clientW-2*left, 20, ssNoprefix, 0)
-	y += 26
+	mk("STATIC", help, left, y, clientW-2*left, 36, ssNoprefix, 0)
+	y += 42
 	uninstallButton := mk("BUTTON", "Uninstall...", left, y, 140, 26, wsTabstop, settingsUninstallID)
 	moveButton := mk("BUTTON", "Move...", left+150, y, 140, 26, wsTabstop, settingsMoveID)
 	cleanupButton := mk("BUTTON", "Remove previous...", left+300, y, 140, 26, wsTabstop, settingsMoveCleanupID)
@@ -410,8 +428,10 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	if portable || stateErr != nil || state.Retained == nil || !state.Retained.Booted || !pathsEqual(state.Retained.Destination, dataDir) {
 		procEnableWindow.Call(cleanupButton, 0)
 	}
+	mk("BUTTON", "Help and shortcuts", left, clientH-40, 150, 26, wsTabstop, settingsHelpID)
 	mk("BUTTON", "Save", clientW-16-180, clientH-40, 84, 26, bsDefpushbutton|wsTabstop, settingsSaveID)
 	mk("BUTTON", "Cancel", clientW-16-84, clientH-40, 84, 26, wsTabstop, settingsCancelID)
+	scroll.move(0)
 	// Settings is often opened from the tray while the maximized QEMU window
 	// owns the foreground. Raise it once, then immediately return it to the
 	// normal z-order so it is visible without staying above unrelated apps.
@@ -427,6 +447,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 			break
 		}
 		if ok, _, _ := procIsDialogMessageW.Call(hwnd, uintptr(unsafe.Pointer(&m))); ok != 0 {
+			scroll.revealFocus()
 			continue
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
