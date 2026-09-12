@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-func TestPortableModeDisablesAutomaticUpdates(t *testing.T) {
+func TestPortableModeUsesAuthenticatedAutomaticUpdates(t *testing.T) {
 	cfg := &config{portable: true}
-	if automaticUpdatesEnabled(cfg, false, defaultReleaseURL, defaultSumsSHA256) {
-		t.Fatal("portable mode enabled the automatic-update network path")
+	if !automaticUpdatesEnabled(cfg, false, defaultReleaseURL, defaultSumsSHA256) {
+		t.Fatal("portable mode disabled authenticated updates")
 	}
 	cfg.portable = false
 	if !automaticUpdatesEnabled(cfg, false, defaultReleaseURL, defaultSumsSHA256) {

@@ -17,7 +17,7 @@ const (
 )
 
 func automaticUpdatesEnabled(cfg *config, noUpdate bool, release, sumsSHA256 string) bool {
-	return !cfg.portable && !noUpdate &&
+	return !noUpdate &&
 		normalizedRelease(release) == defaultReleaseURL &&
 		normalizedSHA256(sumsSHA256) == defaultSumsSHA256
 }
@@ -26,7 +26,7 @@ func releaseSumsForConfig(cfg *config, client *http.Client, release, expectedSHA
 	if !cfg.portable {
 		return releaseSums(client, release, expectedSHA256)
 	}
-	return readPortableManifest(filepath.Join(cfg.payloadDir, "SHA256SUMS"), expectedSHA256)
+	return readPortableManifest(filepath.Join(portablePayloadDirectory(cfg.payloadDir, expectedSHA256), "SHA256SUMS"), expectedSHA256)
 }
 
 // readPortableManifest applies the same independent trust root and structural

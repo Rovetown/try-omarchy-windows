@@ -120,3 +120,18 @@ cross-builds succeed; native ARM guest/runtime integration remains active work.
 The expanded Settings controls also passed the interactive Windows test at a
 500-pixel work-area height: both new buttons remained visible, 60 Tab/Shift+Tab
 steps kept focus visible, and mouse scrolling stayed in position.
+
+### Portable update implementation
+
+Authenticated automatic updates now stage complete payload versions beside the
+portable installation. The previous payload directory remains available to its
+launcher during rollback. Before changing a legacy factory image, the launcher
+creates a checkpoint and converts the active disk to an independent QCOW2,
+verifies its contents and publishes it atomically. A publication failure keeps
+the old disk unchanged.
+
+The update helper records portable layout in its rollback state and replaces
+the executable at the bundle root. A native Windows test confirms replacement,
+restart from the root and retention of the previous executable. Native disk
+tests verify that persistent contents survive a changed factory image. Local
+HTTP tests cover payload staging, version selection, corruption and cancellation.

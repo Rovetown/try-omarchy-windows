@@ -274,7 +274,7 @@ func ensureRuntime(cfg *config, release, sumsSHA256 string) (string, error) {
 	zipPath := filepath.Join(cfg.dir, runtimeZip)
 	removeZip := true
 	if cfg.portable {
-		zipPath = filepath.Join(cfg.payloadDir, runtimeZip)
+		zipPath = filepath.Join(portablePayloadDirectory(cfg.payloadDir, sumsSHA256), runtimeZip)
 		removeZip = false
 		ui.setStatus("Checking the portable graphics engine...")
 		ok, err := verifyFileSHA256(zipPath, sums[runtimeZip], ui.setProgress)

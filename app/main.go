@@ -281,21 +281,20 @@ func main() {
 			}
 			return
 		}
-		// Settings and diagnostics may be opened from the running app's tray.
-		// They must not inspect or roll back an update owned by that parent.
-		if !maintenance && !*openSettings && !*diagnostics {
-			restartArgs, err := encodeRestartArgs(os.Args[1:])
-			if err != nil {
-				fatal("Could not preserve launcher arguments for updates: %v", err)
-			}
-			if rollingBack, recoverErr := recoverLauncherUpdate(cfg.dir, restartArgs); recoverErr != nil {
-				logf("launcher update recovery: %v", recoverErr)
-			} else if rollingBack {
-				return
-			}
+	}
+	// Settings and diagnostics may be opened from the running app's tray.
+	// They must not inspect or roll back an update owned by that parent.
+	if !maintenance && !*openSettings && !*diagnostics {
+		restartArgs, err := encodeRestartArgs(os.Args[1:])
+		if err != nil {
+			fatal("Could not preserve launcher arguments for updates: %v", err)
+		}
+		if rollingBack, recoverErr := recoverLauncherUpdate(cfg.dir, restartArgs); recoverErr != nil {
+			logf("launcher update recovery: %v", recoverErr)
+		} else if rollingBack {
+			return
 		}
 	}
-
 	if *recoveryAction != "" {
 		err := runRecoveryUI(cfg.dir, *recoveryAction)
 		reportRecoveryResult(err)
@@ -496,6 +495,13 @@ func main() {
 				return
 			}
 		}
+	}
+
+	if err := preparePortablePayloadTransition(cfg, *release, *sumsSHA256); err != nil {
+		if finishSetupCancellation(cfg, err) {
+			return
+		}
+		fatal("Could not preserve the portable disk before updating:\n\n%v", err)
 	}
 
 	// Machine setup the old bootstrap.ps1 handled: hypervisor on (may walk the

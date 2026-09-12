@@ -48,6 +48,17 @@ func maybeStartLauncherUpdate(cfg *config, updateURL string, restartArgs []strin
 	if _, err := releaseSums(downloadClient, manifest.Release, manifest.ManifestSHA256); err != nil {
 		return false, fmt.Errorf("authenticating updated guest manifest: %w", err)
 	}
+	if cfg.portable {
+		if err := preparePortablePayloadTransition(cfg, manifest.Release, manifest.ManifestSHA256); err != nil {
+			return false, err
+		}
+		if err := stagePortablePayload(cfg.payloadDir, manifest.Release, manifest.ManifestSHA256, downloadClient, func(_ string, done, total int64) {
+			ui.setStatus("Preparing the portable update...")
+			ui.setProgress(done, total)
+		}); err != nil {
+			return false, err
+		}
+	}
 	launcherURL := normalizedRelease(manifest.Release) + "/" + manifest.Launcher.Name
 	if err := ensureVerifiedDownload(downloadClient, launcherURL, staged, manifest.Launcher.SHA256,
 		"Downloading a trusted Try Omarchy update...", ui); err != nil {
@@ -59,7 +70,7 @@ func maybeStartLauncherUpdate(cfg *config, updateURL string, restartArgs []strin
 	}
 	state := &launcherUpdateState{
 		Schema: updateStateVersion, Version: manifest.Version,
-		SHA256: manifest.Launcher.SHA256,
+		SHA256: manifest.Launcher.SHA256, Portable: cfg.portable,
 	}
 	if err := writeLauncherUpdateState(cfg.dir, state); err != nil {
 		return false, err
@@ -89,7 +100,18 @@ func applyLauncherUpdate(dir string, waitPID int, encodedArgs string, rollback b
 	if err != nil {
 		return err
 	}
-	target := filepath.Join(dir, stableLauncherName)
+	state, err := readLauncherUpdateState(dir)
+	if err != nil {
+		return err
+	}
+	if state == nil {
+		return fmt.Errorf("pending update state is missing")
+	}
+	portable := state.Portable
+	target, err := launcherUpdateTarget(dir, portable)
+	if err != nil {
+		return err
+	}
 	if rollback {
 		if err := copyLauncher(self, target, replaceLauncher); err != nil {
 			return fmt.Errorf("restore previous launcher: %w", err)
