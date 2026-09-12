@@ -119,3 +119,17 @@ func TestUSBInventoryAndStablePortIdentity(t *testing.T) {
 		t.Fatal("accepted malformed USB identity")
 	}
 }
+
+func TestUSBZeroIdentifiersRemainExact(t *testing.T) {
+	devices, err := parseUSBHostDevices("  Bus 1, Addr 3, Port 2, Speed 12 Mb/s\n    Class 00: USB device 0000:0000\n")
+	if err != nil || len(devices) != 1 {
+		t.Fatal(devices, err)
+	}
+	fake := &usbFake{inventory: "  Bus 1, Addr 3, Port 2, Speed 12 Mb/s\n    Class 00: USB device 0000:0000\n"}
+	if err := (usbBroker{fake}).Attach(context.Background(), devices[0]); err != nil {
+		t.Fatal(err)
+	}
+	if fake.added["vendorid"] != 0 || fake.added["productid"] != 0 || fake.added["auto-reconnect"] != false {
+		t.Fatal("zero IDs became wildcard selection")
+	}
+}

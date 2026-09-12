@@ -97,7 +97,11 @@ def main() -> None:
     parser.add_argument("--displays", type=int, choices=range(1, 17), help="also boot the graphical desktop and verify this many guest displays")
     parser.add_argument("--network-address", help="verify TCP and UDP forwarding through this host IPv4 address")
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm", help="use TCG for nested Windows runtime testing")
+    parser.add_argument("--login-delay", type=float, help="wait for provisioning before the first serial login; TCG defaults to 60 seconds")
     args = parser.parse_args()
+    login_delay = args.login_delay if args.login_delay is not None else (60 if args.accel == "tcg" else 0)
+    if login_delay < 0:
+        parser.error("login delay must not be negative")
     network_ports = []
     if args.network_address:
         ipaddress.IPv4Address(args.network_address)
@@ -184,6 +188,7 @@ def main() -> None:
     password_sent_at: float | None = None
     password_offset = 0
     last_login_prompt = -1
+    pending_login_at = None
     last_password_prompt = -1
 
     try:
@@ -228,10 +233,8 @@ def main() -> None:
                     return
 
                 login_prompt = transcript.rfind(b"login:")
-                if login_prompt > last_login_prompt and login_attempts < 20:
-                    process.stdin.write(b"omarchy\n")
-                    process.stdin.flush()
-                    login_attempts += 1
+                if login_prompt > last_login_prompt and login_attempts < 3:
+                    pending_login_at = time.monotonic() + (login_delay if login_attempts == 0 else 30)
                     last_login_prompt = login_prompt
 
                 password_prompt = transcript.rfind(b"Password:")
@@ -245,8 +248,15 @@ def main() -> None:
                 if password_sent_at is not None and b"Login incorrect" in transcript[password_offset:]:
                     password_sent_at = None
 
+            if pending_login_at is not None and time.monotonic() >= pending_login_at:
+                process.stdin.write(b"omarchy\n")
+                process.stdin.flush()
+                login_attempts += 1
+                pending_login_at = None
+
             if (
                 password_sent_at is not None
+                and b"targetuser=omarchy;" in transcript[password_offset:]
                 and not sent_command
                 and time.monotonic() - password_sent_at >= 3
             ):

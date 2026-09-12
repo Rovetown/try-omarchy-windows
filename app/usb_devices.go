@@ -33,7 +33,7 @@ func (d usbDevice) identity() string {
 	return usbDevicePrefix + hex.EncodeToString(sum[:12])
 }
 func (d usbDevice) validate() error {
-	if d.Bus < 0 || d.Bus > 255 || d.Address < 1 || d.Address > 127 || d.Vendor < 1 || d.Vendor > 65535 || d.Product < 0 || d.Product > 65535 || !usbPort.MatchString(d.Port) || len(d.Port) > 27 {
+	if d.Bus < 0 || d.Bus > 255 || d.Address < 1 || d.Address > 127 || d.Vendor < 0 || d.Vendor > 65535 || d.Product < 0 || d.Product > 65535 || !usbPort.MatchString(d.Port) || len(d.Port) > 27 {
 		return fmt.Errorf("invalid USB device identity")
 	}
 	return nil
