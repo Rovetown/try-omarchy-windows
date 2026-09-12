@@ -1,8 +1,8 @@
 # Moving a Try Omarchy setup to a real Omarchy install
 
-Try Omarchy is disposable by design: deleting `%LOCALAPPDATA%\TryOmarchy` is
-the uninstall. If the trial wins you over, `try-omarchy-export` carries the
-parts worth keeping to a bare-metal Omarchy install.
+Use Settings or Windows Apps & features to uninstall Try Omarchy, including
+moved or custom installations. If the trial wins you over,
+`try-omarchy-export` carries your configuration to a full Omarchy install.
 
 ## Export inside Omarchy
 
@@ -17,8 +17,7 @@ Try Omarchy was started with `-share`, otherwise to your home folder. Pass a
 directory to choose another place. The archive contains:
 
 - `home/`: an allowlist of Omarchy, Hyprland, terminal, bar, notification,
-  input, and other desktop configuration; `~/.local/share/omarchy`;
-  `~/.local/bin`; and shell dotfiles (`.bashrc`, `.zshrc`, `.gitconfig`, and
+  input, and other desktop configuration; `~/.local/bin`; and shell dotfiles (`.bashrc`, `.zshrc`, `.gitconfig`, and
   friends).
 - `theme`: the name of the theme you had selected.
 - `packages/repo.txt` and `packages/aur.txt`: packages you added on top of the
@@ -47,6 +46,15 @@ The script backs up anything it replaces under
 pacman and the AUR packages with yay, and selects your theme. Log out and back
 in afterwards so Hyprland and the shell pick up the restored configuration.
 
-Packages that no longer exist, or themes you installed from a third-party
-repository, are reported at the end rather than stopping the restore. Review
-`packages/*.txt` if something is missing.
+The updated exporter preserves the destination's `monitors.lua` and
+`monitors.conf`, and does not replace its Omarchy runtime location. Linked
+Hyprland configuration requires manual review rather than automatic replacement.
+
+Package or theme failures, including missing `yay` or `omarchy-theme-set`,
+produce an incomplete-restore message and a nonzero exit status. Configuration
+already restored and its backups remain available. Review `packages/*.txt`
+and the reported errors before logging out.
+
+These migration fixes require the next guest image with compatibility
+revision 17. The existing v0.0.15-preview draft contains revision 16; archives
+created by that draft still contain the earlier restore script.
