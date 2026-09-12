@@ -255,15 +255,18 @@ func TestDownloadVerifiedTimesOutIdleBody(t *testing.T) {
 		w.Header().Set("Content-Length", "1")
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
-		time.Sleep(100 * time.Millisecond)
-		w.Write([]byte("x"))
+		// Keep the body stalled until the client closes it. A fixed sleep can
+		// finish before the watchdog runs on a busy Windows test host.
+		<-r.Context().Done()
 	}))
 	defer server.Close()
 	dest := filepath.Join(t.TempDir(), "payload.bin")
 	opts := fastDownloadOptions()
 	opts.maxAttempts = 1
 	opts.idleTimeout = 20 * time.Millisecond
-	err := downloadVerifiedWithOptions(server.Client(), server.URL, dest, testSHA256([]byte("x")), nil, opts)
+	client := server.Client()
+	client.Timeout = 3 * time.Second
+	err := downloadVerifiedWithOptions(client, server.URL, dest, testSHA256([]byte("x")), nil, opts)
 	if err == nil || !strings.Contains(err.Error(), "stalled") {
 		t.Fatalf("error = %v, want idle-stall failure", err)
 	}
