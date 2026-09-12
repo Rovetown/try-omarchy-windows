@@ -37,10 +37,13 @@ are made.
 ## Running PowerShell in the VM
 
 `winps.sh` runs a PowerShell script (file or stdin) over SSH without echoing
-the password; it reads `PASSWORD` from the container's environment. Two traps:
+the password; it reads `PASSWORD` from the container's environment. Common traps:
 
 - Multi-line `if`/`while` blocks over `powershell -Command -` stop silently.
   Keep control flow on one line, or end the script with a blank line.
+- For JSON evidence, split `Get-Content -Raw` into plain log strings before
+  serializing. Deep serialization of ordinary `Get-Content` objects can traverse
+  PowerShell provider metadata and stall the harness.
 - Every SSH PowerShell session opens a Windows Terminal window on the VM
   desktop that covers dialogs. Screenshots must minimize other windows and
   raise the target from inside the interactive task (`screenshot.ps1 -front`).

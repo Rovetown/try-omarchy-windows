@@ -34,8 +34,57 @@ embedded public key and identifies the same launcher and payload hashes.
   into an isolated home, preserving native monitor settings, the native runtime
   location, and original configuration backups.
 
-The isolated restore used stubbed package and theme commands. It does not
-establish native Omarchy package or theme restoration.
+## Additional recovery and restore checks
+
+- Restored an export from the signed candidate onto a separate fresh Windows
+  guest using real package and theme commands. The archive carried `cowsay`
+  and Catppuccin. Both were restored successfully, while destination-specific
+  monitor configuration, the runtime link, and original backups were preserved.
+  A second restore retained separate backups and skipped the installed package.
+- Exercised the signed launcher's staged update helper with the authenticated
+  v16 executable and the exact signed v15 executable as its previous version.
+  Interrupted after QMP connected, before userspace readiness, while both
+  launcher and guest update markers were pending. Recovery restored both v15
+  hashes, cleared the markers, and booted the preserved guest. Its document,
+  installed package, and theme survived.
+- Retried the staged update without interruption. Both v16 components committed
+  after guest readiness, their hashes matched, and the same guest data survived.
+- A low-space attempt refused the guest update before replacing its payload.
+  Launcher recovery restored v15 and the guest remained usable. The dedicated
+  Windows test volume was then expanded without deleting earlier evidence.
+
+The initial isolated-home restore used stubbed commands; the later guest-to-guest
+restore exercised the real repository package installer and theme selector.
+It did not test AUR installation or restoration onto physical native Omarchy.
+
+## Update authentication and public routes
+
+- Fourteen cases exercised production `fetchUpdateManifest` with the unchanged
+  embedded public key and genuine v15/v16 signatures. Genuine metadata passed;
+  altered metadata/signatures, truncated responses, and HTTP 404 responses were
+  rejected. The tests passed with Go's race detector.
+- The signed v15 launcher accepted genuine v16 metadata served locally, then
+  encountered the expected HTTP 404 at the authenticated GitHub draft URL.
+  Its executable and guest receipt remained unchanged, with no pending update.
+  Booting with the production v15 URL also encountered a draft 404 because this
+  test installation had been prepared from a local asset server.
+- Current public v14 assets passed through official and legacy repository names,
+  with tagged and latest URLs. All 32 requests succeeded after redirects. Both
+  signed feeds, the pinned manifest, and executable hashes agreed. Rootfs
+  availability was checked with HEAD; the image was not downloaded in this check.
+
+The staged transaction used locally authenticated files and an explicit local
+payload URL. It does not establish the complete automatic update path from an
+unpublished draft. No production trust key, repository allowlist, or TLS trust
+was changed for these tests.
+
+## Full Hyper-V lab attempt
+
+Enabling `Microsoft-Hyper-V-All` required a Windows restart. The nested Windows
+lab then remained at the boot screen with SSH unavailable, before Try Omarchy
+could start. This attempt does not establish candidate compatibility or a
+candidate regression. Full Hyper-V acceptance still needs a suitable Windows
+host. The earlier tests used Windows Hypervisor Platform without the full role.
 
 ## Remaining acceptance
 
@@ -44,12 +93,12 @@ audio fallback. Physical GPU/audio, full Hyper-V, remote input, sleep/resume,
 mixed-DPI, and long-session acceptance remain open. Restore onto a fresh
 physical Omarchy installation still needs real package and theme validation.
 
-The [v0.0.15 report](PREVIEW-15-VALIDATION.md) records the earlier signed
-interruption and rollback checks. Those results are not a repeat against the
-v0.0.16 payload. The [revision 17 report](MIGRATION-17-VALIDATION.md) records disk
-growth and preservation after lowering the setting with a local payload.
+The [revision 17 report](MIGRATION-17-VALIDATION.md) records disk growth and
+preservation after lowering the setting with a local payload.
 
-Draft assets were served locally for the Windows tests. Anonymous pre-transfer
-updates and preview-to-stable migration through both signed feeds still need
-end-to-end acceptance. Keep the draft unpublished until the release gates in
-[V1-READINESS.md](V1-READINESS.md) are satisfied.
+Draft assets were served locally for the Windows tests. Anonymous delivery of
+the v16 assets and final tagged/latest feeds must be checked during controlled
+publication, since drafts are not anonymously downloadable. Preview-to-stable
+migration by an old executable through both signed feeds still needs end-to-end
+acceptance before v1. Keep pre-publication hardware gates in
+[V1-READINESS.md](V1-READINESS.md) open until they are tested on suitable machines.
