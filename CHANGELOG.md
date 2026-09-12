@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.0.16-preview
+
+- Preserve native monitor settings and the Omarchy runtime location when
+  restoring a configuration export.
+- Report incomplete package or theme restoration and retain separate backups
+  when restoring more than once.
+
+Release candidate. Physical Windows and native Omarchy restore acceptance
+remain required before publication.
+
 ## v0.0.15-preview
 
 - Added a Settings flow for moving stopped installations, with verified copying
