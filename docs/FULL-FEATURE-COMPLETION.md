@@ -228,3 +228,27 @@ update integration and compatibility version 18. The serial harness now waits
 for provisioning and a confirmed login session before sending checks. A byte
 stream wrapper avoids PowerShell console translation and removes only its own
 Windows QEMU process on timeout; timeout cleanup passed separately.
+
+### Active snapshot rollback
+
+Snapshots now offers Roll back alongside Restore as copy. Rollback verifies the
+archive, checks architecture, prepares the complete replacement, and retains
+the previous guest, disk, runtime and settings in a separate recovery folder.
+Portable disks are converted and compared before publication, preserving the
+portable layout. Recovery shortcuts open the retained state.
+
+A durable journal records the replacement inventory before any active files
+move. Launch recovers an interrupted replacement before reading guest settings
+or starting updates. Uncommitted replacements recover the previous state;
+committed replacements retain the restored state. Recovery preserves both sides
+and refuses missing or conflicting files. The snapshot catalog, launcher, host
+identity and unrelated files remain in place.
+
+Tests cover every publication and recovery interruption point, repeated rollback,
+retained documents, corrupt archives, busy disks, cancellation, pending updates,
+invalid journals and architecture mismatch. Native Windows tests also pass with
+real QCOW2 conversion and comparison.
+
+The interactive Windows snapshot manager also passed create, list, active rollback,
+retained work, recovery shortcuts and close. The UI harness finds dialogs by the
+test process and uses the observed Windows OK control.

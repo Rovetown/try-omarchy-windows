@@ -262,6 +262,11 @@ func (s checkpointStore) Restore(id, destination string, report backupProgress) 
 	if pathsOverlap(sourcePath, destination) {
 		return fmt.Errorf("restore the snapshot into a new folder outside this installation")
 	}
+	return s.restoreVerified(id, destination, report)
+}
+
+// Private destinations are used only by the journaled active rollback.
+func (s checkpointStore) restoreVerified(id, destination string, report backupProgress) error {
 	root, err := s.open(false)
 	if err != nil {
 		return err

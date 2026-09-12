@@ -16,7 +16,7 @@ import (
 func runCheckpointUI(dir string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	const listID, nameID, createID, restoreID, deleteID, closeID = 4100, 4101, 4102, 4103, 4104, 4105
+	const listID, nameID, createID, restoreID, deleteID, closeID, rollbackID = 4100, 4101, 4102, 4103, 4104, 4105, 4106
 	const operationDone, progressChanged = 0x8020, 0x8021
 	store := checkpointStore{installation: dir}
 	if err := store.Recover(); err != nil {
@@ -56,7 +56,7 @@ func runCheckpointUI(dir string) error {
 		if len(entries) > 0 {
 			procSendMessageW.Call(list, 0x186, 0, 0)
 		}
-		setText(status, fmt.Sprintf("%d snapshots. Your current installation stays intact when restoring a copy.", len(entries)))
+		setText(status, fmt.Sprintf("%d snapshots. Restore a copy or roll back this installation.", len(entries)))
 	}
 	selected := func() (vmCheckpoint, bool) {
 		index, _, _ := procSendMessageW.Call(list, 0x188, 0, 0)
@@ -164,6 +164,34 @@ func runCheckpointUI(dir string) error {
 					}
 					return outcome{message: message}
 				})
+			case rollbackID:
+				entry, ok := selected()
+				if !ok {
+					infoBox("Select a snapshot first.")
+					return 0
+				}
+				if entry.Problem != "" {
+					errorBox(entry.Problem)
+					return 0
+				}
+				if msgBox("Roll back to snapshot \""+entry.Name+"\"?\n\nThis replaces the active guest and settings. Your current state will be retained in a recovery folder.", mbYesNo|mbIconQuestion|mbDefbutton2) != idYes {
+					return 0
+				}
+				start("Rolling back snapshot.", func(report backupProgress) outcome {
+					retained, err := store.Rollback(entry.ID, report)
+					if err != nil {
+						return outcome{err: err}
+					}
+					recoveryFolder := retained
+					if disk, err := inspectInstallationDisk(retained); err == nil && disk.Format == "qcow2" {
+						recoveryFolder = filepath.Dir(retained)
+					}
+					message := "Snapshot restored. Open Try Omarchy normally to use it.\n\nYour previous state is retained at:\n\n" + recoveryFolder
+					if err := createRollbackRecoveryLaunchers(retained); err != nil {
+						message += "\n\nCould not create recovery shortcuts: " + err.Error()
+					}
+					return outcome{message: message}
+				})
 			case deleteID:
 				entry, ok := selected()
 				if !ok {
@@ -234,21 +262,22 @@ func runCheckpointUI(dir string) error {
 		procSendMessageW.Call(handle, wmSetfont, font, 1)
 		return handle
 	}
-	control("STATIC", "Close Omarchy to capture a restore point. Restore keeps your current work and opens a separate copy.", 16, 12, 608, 34, ssNoprefix, 0)
+	control("STATIC", "Close Omarchy before taking or restoring snapshots. Rollback retains your current state in a recovery folder.", 16, 12, 608, 34, ssNoprefix, 0)
 	list = control("LISTBOX", "", 16, 52, 608, 178, wsBorder|wsVscroll|wsTabstop|1, listID)
 	control("STATIC", "Snapshot name", 16, 244, 120, 24, ssNoprefix, 0)
 	name = control("EDIT", "Before changes", 140, 240, 330, 26, wsBorder|wsTabstop|esAutohscroll, nameID)
 	procSendMessageW.Call(name, 0xC5, 160, 0) // EM_SETLIMITTEXT
 	create := control("BUTTON", "Create snapshot", 484, 240, 140, 26, wsTabstop, createID)
 	restore := control("BUTTON", "Restore as copy...", 16, 282, 152, 28, wsTabstop, restoreID)
-	remove := control("BUTTON", "Delete snapshot...", 180, 282, 152, 28, wsTabstop, deleteID)
+	rollback := control("BUTTON", "Roll back...", 178, 282, 130, 28, wsTabstop, rollbackID)
+	remove := control("BUTTON", "Delete...", 318, 282, 130, 28, wsTabstop, deleteID)
 	closeButton = control("BUTTON", "Close", 484, 282, 140, 28, wsTabstop, closeID)
 	status = control("STATIC", "", 16, 324, 608, 40, ssNoprefix, 0)
 	if controlErr != nil {
 		procDestroyWindow.Call(hwnd)
 		return controlErr
 	}
-	buttons = []uintptr{list, name, create, restore, remove}
+	buttons = []uintptr{list, name, create, restore, rollback, remove}
 	refresh()
 	procSetForegroundWindow.Call(hwnd)
 	procSetFocus.Call(name)

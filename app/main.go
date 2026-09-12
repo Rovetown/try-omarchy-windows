@@ -302,6 +302,11 @@ func main() {
 			return
 		}
 	}
+	if !*openSettings && !*diagnostics && !*applyLauncherUpdateFlag && !*applyLauncherRollbackFlag {
+		if err := recoverCheckpointRollback(cfg.dir); err != nil {
+			fatal("Cannot finish snapshot recovery: %v", err)
+		}
+	}
 	// Settings and diagnostics may be opened from the running app's tray.
 	// They must not inspect or roll back an update owned by that parent.
 	if !maintenance && !*openSettings && !*diagnostics {

@@ -202,3 +202,29 @@ func recoveryProgress(action string) backupProgress {
 		ui.setProgress(current, total)
 	}
 }
+
+// A retained portable disk still uses its relative guest backing path. Keep
+// that layout and provide a portable launcher in the enclosing recovery bundle.
+func createRollbackRecoveryLaunchers(dir string) error {
+	disk, err := inspectInstallationDisk(dir)
+	if err != nil {
+		return err
+	}
+	if disk.Format == "raw" {
+		return createRestoredLaunchers(dir)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	root := filepath.Dir(dir)
+	if err := copyLauncher(self, filepath.Join(root, stableLauncherName), replaceLauncher); err != nil {
+		return err
+	}
+	for name, flags := range map[string]string{"Start Omarchy.cmd": "-portable", "Settings.cmd": "-portable -settings"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("@echo off\r\n\"%~dp0TryOmarchy.exe\" "+flags+" %*\r\n"), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
