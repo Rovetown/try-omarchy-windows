@@ -1,0 +1,14 @@
+--- a/util/oslib-win32.c
++++ b/util/oslib-win32.c
+@@ -548,7 +548,10 @@
+     __except1 {
+     }
+ 
+-    if (!SetHandleInformation((HANDLE)s, flags, flags)) {
++    /* Restore the bit we changed even when the original flags were zero.
++     * A zero mask leaves PROTECT_FROM_CLOSE set and leaks the socket. */
++    if (!SetHandleInformation((HANDLE)s, HANDLE_FLAG_PROTECT_FROM_CLOSE,
++                              flags & HANDLE_FLAG_PROTECT_FROM_CLOSE)) {
+         errno = EACCES;
+         return -1;
+     }

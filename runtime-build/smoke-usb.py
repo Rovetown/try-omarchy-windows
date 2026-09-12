@@ -40,7 +40,15 @@ def main():
                     request["arguments"] = arguments
                 connection.sendall(json.dumps(request).encode() + b"\n")
                 while True:
-                    reply = json.loads(stream.readline())
+                    try:
+                        line = stream.readline()
+                    except ConnectionResetError:
+                        if command == "quit":
+                            return None
+                        raise
+                    if not line and command == "quit":
+                        return None
+                    reply = json.loads(line)
                     if "event" in reply:
                         continue
                     if reply.get("id") != sequence:
@@ -62,6 +70,8 @@ def main():
                 raise RuntimeError("failed attachment left a device object")
             call("quit")
             process.wait(timeout=10)
+            if process.returncode != 0:
+                raise RuntimeError(f"QEMU quit with status {process.returncode}")
         print("ok - USB controller, explicit attachment failure, and failed-device cleanup")
     finally:
         if process.poll() is None:

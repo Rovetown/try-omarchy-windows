@@ -63,6 +63,7 @@ jobs:
           runtime-output/smoke/qemu-system-x86_64.exe -device usb-host,help 2>&1 | tee runtime-output/smoke/usb-properties.txt
           grep -F 'auto-reconnect' runtime-output/smoke/usb-properties.txt
           python runtime-build/smoke-usb.py runtime-output/smoke/qemu-system-x86_64.exe
+          python runtime-build/smoke-memory.py runtime-output/smoke/qemu-system-x86_64.exe
 
       - name: Verify archives
         shell: pwsh

@@ -27,3 +27,9 @@ bus/address must exist, vendor/product/port must still match, and opening the
 device must succeed before QMP acknowledges it. Unplugging does not silently
 claim a replacement device. The default preserves upstream auto-scan behavior.
 CI verifies `usb-host`, `qemu-xhci` and the explicit-attachment property.
+
+The r5 recipe restores the Windows socket handle protection bit with an explicit
+mask before closing the socket. The old zero-mask call left protection enabled
+when the original flags were zero. A compiled source fixture covers all original
+flag combinations. Saved-session tests require a complete socket stream and
+never accept an idle timeout as end of data.

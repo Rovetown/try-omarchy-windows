@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r4",
+  "name": "winq-emu-alpha10-source-r5",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -25,6 +25,10 @@
       {
         "file": "patches/qemu/0004-bound-usb-port-path-formatting.patch",
         "sha256": "59655b858dafd7a6125d886a73174056934c5b492152431ed315052f6197dbea"
+      },
+      {
+        "file": "patches/qemu/0005-restore-windows-socket-handle-protection.patch",
+        "sha256": "3d25a06e9b0eeb11a6781e4655cbee7ce201f2f75f55457f96e9ae4bde0a7623"
       }
     ]
   },
