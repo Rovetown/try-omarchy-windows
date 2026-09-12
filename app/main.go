@@ -713,6 +713,9 @@ func main() {
 	go runCloseGuard()
 	runClipboardBridge()
 
+	if err := checkForwardBindings(cfg.forwards); err != nil {
+		fatal("Could not prepare port forwarding:\n\n%v", err)
+	}
 	if err := ensureLANFirewall(cfg); err != nil {
 		fatal("Could not prepare LAN forwarding:\n\n%v", err)
 	}
@@ -786,6 +789,9 @@ func supervise(cfg *config, cmdline string) bool {
 				return false
 			case <-exited:
 				startupDead = true
+				if forwardStartupProblem(cfg.vmDir) {
+					fatal("A configured port could not be opened. Another application may be using it, or the network adapter changed. Update the forward in Settings and try again.")
+				}
 				// The host refused nested virtualization for the partition
 				// (issue #19). Nothing else about the launch is wrong, so
 				// retry with the irqchip in QEMU, which never asks for it.

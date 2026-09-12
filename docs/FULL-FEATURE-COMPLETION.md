@@ -200,3 +200,10 @@ Live display tracking also detects monitor topology changes and restores an
 output that is no longer visible. The native three-window fixture passes
 recovery after simulated monitor removal while leaving deliberate window
 placement alone when the monitor layout has not changed.
+
+The full native Windows launcher suite passes with the bundled QEMU image tool.
+Interactive display and USB manager checks run separately on the desktop.
+Forwarding now probes the complete TCP/UDP binding set before configuring the
+firewall, releases every probe socket, and identifies QEMU bind errors without
+triggering GPU fallback or runtime rollback. Occupied-port and socket-release
+regressions pass on both operating systems.

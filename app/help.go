@@ -12,4 +12,6 @@ Ctrl+Alt+F: fullscreen. Ctrl+Alt+G: release input. The Windows key goes to Omarc
 
 For SSH, add tcp:2222:22 in Settings and restart. Connect to localhost:2222. Add LAN lets you choose a Windows adapter and port for other devices on your local network. LAN rules apply on private and domain networks by default; public networks are an explicit Settings choice.
 
+USB devices in the tray lets you attach a device to the running guest and release it back to Windows. Eject mounted storage before switching it. Refresh after unplugging or reconnecting a device.
+
 Run Omarchy's updater inside the guest for package and Omarchy upgrades. Launcher updates are separate. For problems, create diagnostics in the tray and review the ZIP before sharing.`

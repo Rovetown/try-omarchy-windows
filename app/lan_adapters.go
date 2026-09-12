@@ -41,7 +41,7 @@ func resolveForwardAdapters(forwards []portForward, bindings map[string]string, 
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("the selected network adapter is unavailable; choose another with Add LAN in Settings")
+				return nil, fmt.Errorf("the network adapter for %s is unavailable; remove or update this forward in Settings, then select an available adapter with Add LAN", forward.String())
 			}
 			forward.bind = address
 		}

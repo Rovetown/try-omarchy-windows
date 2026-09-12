@@ -96,6 +96,7 @@ def main() -> None:
     parser.add_argument("--package-update", action="store_true", help="also exercise pacman against current signed repositories in the disposable snapshot")
     parser.add_argument("--displays", type=int, choices=range(1, 17), help="also boot the graphical desktop and verify this many guest displays")
     parser.add_argument("--network-address", help="verify TCP and UDP forwarding through this host IPv4 address")
+    parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm", help="use TCG for nested Windows runtime testing")
     args = parser.parse_args()
     network_ports = []
     if args.network_address:
@@ -108,7 +109,7 @@ def main() -> None:
         FACT_CHECKS["package-update"] = "sudo pacman -Syu --noconfirm >/tmp/tryomarchy-package-update.log 2>&1 && echo yes || { cat /tmp/tryomarchy-package-update.log >&2; echo no; }"
         EXPECTED_FACTS["package-update"] = "yes"
 
-    if not Path("/dev/kvm").exists() or not os.access("/dev/kvm", os.R_OK | os.W_OK):
+    if args.accel == "kvm" and (not Path("/dev/kvm").exists() or not os.access("/dev/kvm", os.R_OK | os.W_OK)):
         raise SystemExit("release smoke test requires accessible /dev/kvm")
 
     spec = json.loads((args.artifacts / "build-spec.json").read_text(encoding="utf-8"))
@@ -129,11 +130,11 @@ def main() -> None:
         "-no-reboot",
         "-snapshot",
         "-accel",
-        "kvm",
+        args.accel,
         "-machine",
         "q35",
         "-cpu",
-        "host",
+        "host" if args.accel == "kvm" else "max",
         "-smp",
         "4",
         "-m",

@@ -27,6 +27,7 @@ def main():
                 time.sleep(.1)
         if connection is None:
             raise RuntimeError("QEMU did not open its control socket")
+        connection.settimeout(20)
         with connection, connection.makefile("rb") as stream:
             if "QMP" not in json.loads(stream.readline()):
                 raise RuntimeError("missing QMP greeting")
