@@ -10,7 +10,8 @@ The guest extends the image validated by #92 with lock authentication repair
 and the current signed package transaction. It uses runtime `4.0.3-3`,
 compatibility revision 16, Chromium `153.0.8010.36-1`, Hyprland `0.56.2-3` and
 gpu-screen-recorder `6.1.2-1`. The combined payload retains published WINQ-EMU
-Alpha 10; the source-built runtime is a separate hardware-validation gate.
+Alpha 10 filenames, whose pinned archives already contain source-built
+revision 3. Physical runtime acceptance remains a separate gate.
 The earlier image passed a full 4.0.2 to 4.0.3 upgrade and five boot checks.
 
 The combined payload checksum-list SHA256 is:

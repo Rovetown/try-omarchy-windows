@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.15-preview
 
 - Added a Settings flow for moving stopped installations, with verified copying
   and recovery if activation is interrupted.
@@ -9,11 +9,13 @@
 - Fixed browser theme permissions, build-account ownership of system files,
   and icon names that caused package update hooks to fail.
 - Added missing media tools and upstream system defaults.
+- Restored lock-screen authentication for fresh and existing guests.
+- Fixed upgrade notices arriving before desktop notifications are ready.
 - Reduced empty-block scanning during restore and fixed short reads in reclaim.
 - Improved guest package refresh checks and draft PR creation.
 
-Combined candidate validation is in progress. Windows hardware acceptance remains
-required before release.
+Release candidate. Automated checks and Windows VM recovery tests pass; signed
+candidate and physical Windows acceptance remain required before publication.
 
 ## v0.0.14-preview - 2026-09-05
 

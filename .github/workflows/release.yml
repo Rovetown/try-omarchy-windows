@@ -145,6 +145,9 @@ jobs:
           go-version-file: app/go.mod
           cache-dependency-path: app/go.sum
 
+      - name: Validate test release pin
+        run: python scripts/release/validate-pin.py $env:RELEASE_TAG
+
       - name: Build optimized launcher
         working-directory: app
         shell: pwsh
@@ -185,7 +188,7 @@ jobs:
             -release "https://github.com/$env:UPDATE_RELEASE_REPOSITORY/releases/download/$env:RELEASE_TAG" `
             -manifest-sha256 $manifestHash `
             -launcher TryOmarchy.exe `
-            -output "$env:RUNNER_TEMP/update.json"
+            -output "test-update.json"
 
       - name: Package signed test launcher
         shell: pwsh
@@ -200,6 +203,8 @@ jobs:
           path: |
             app/TryOmarchy.exe
             app/TryOmarchy.exe.sha256
+            app/test-update.json
+            app/test-update.json.sig
           retention-days: 3
           if-no-files-found: error
 

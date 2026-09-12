@@ -1,7 +1,12 @@
 # Source-built runtime validation
 
-The Runtime workflow produces an unsigned test artifact. Keep the public
-runtime pin unchanged until all of these pass on supported Windows versions.
+The published runtime already uses our source-built `winq-emu-alpha10-source-r3`
+archives. On September 12, both public v0.0.9-preview archives were downloaded
+and verified against `guest-build/runtime.lock.json`; the bundled source lock
+matches the current recipe. The Alpha 10 filenames are retained for compatibility.
+
+The Runtime workflow produces replacement test artifacts. Keep the current pin
+until a replacement passes these checks on supported Windows versions.
 
 - `qemu-system-x86_64.exe --version` reports QEMU 11.0.0.
 - `qemu-system-x86_64.exe -accel help` lists WHPX.
