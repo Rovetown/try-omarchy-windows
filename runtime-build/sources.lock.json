@@ -21,6 +21,10 @@
       {
         "file": "patches/qemu/0003-usb-explicit-attachment-without-reconnect.patch",
         "sha256": "2c838d4b4224dd344f9d036f7ea5b7d216a92cbf45ecefb07f66865698dc347f"
+      },
+      {
+        "file": "patches/qemu/0004-bound-usb-port-path-formatting.patch",
+        "sha256": "59655b858dafd7a6125d886a73174056934c5b492152431ed315052f6197dbea"
       }
     ]
   },
