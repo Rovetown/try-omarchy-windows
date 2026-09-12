@@ -3,7 +3,8 @@
 Tested September 12, 2026. Migration fixes are merged in
 [PR #100](https://github.com/omacom/try-omarchy-windows/pull/100).
 The v0.0.15-preview draft still contains compatibility revision 16 and does not
-include these fixes. A new signed release candidate is required.
+include these fixes. The [v0.0.16 report](PREVIEW-16-VALIDATION.md) records
+subsequent checks with the signed candidate containing them.
 
 ## Candidate
 
