@@ -15,8 +15,9 @@ import (
 type clipKind string
 
 const (
-	clipText clipKind = "text"
-	clipPNG  clipKind = "png"
+	clipText  clipKind = "text"
+	clipPNG   clipKind = "png"
+	clipFiles clipKind = "files"
 )
 
 const (
@@ -38,6 +39,9 @@ func (i clipItem) allowed() bool {
 	switch i.Kind {
 	case clipText:
 		return clipboardTextAllowed(string(i.Data))
+	case clipFiles:
+		_, err := inspectClipboardArchive(i.Data)
+		return err == nil
 	case clipPNG:
 		return len(i.Data) > len(pngSignature) && len(i.Data) <= maxClipboardImageBytes && bytes.HasPrefix(i.Data, pngSignature)
 	}
@@ -58,13 +62,15 @@ func encodeClipFrame(i clipItem) string {
 	line := base64.StdEncoding.EncodeToString(i.Data)
 	if i.Kind == clipPNG {
 		line = pngFramePrefix + line
+	} else if i.Kind == clipFiles {
+		line = "files:" + line
 	}
 	return line + "\n"
 }
 
 // maxClipFrameBytes bounds one incoming line: base64 expands by 4/3, plus the
 // prefix and terminator.
-const maxClipFrameBytes = (maxClipboardImageBytes+2)/3*4 + len(pngFramePrefix) + 2
+const maxClipFrameBytes = (maxClipboardImageBytes+2)/3*4 + len("files:") + 2
 
 func decodeClipFrame(line string) (clipItem, bool) {
 	line = strings.TrimRight(line, "\r\n")
@@ -72,6 +78,10 @@ func decodeClipFrame(line string) (clipItem, bool) {
 	if strings.HasPrefix(line, pngFramePrefix) {
 		kind = clipPNG
 		line = line[len(pngFramePrefix):]
+	}
+	if strings.HasPrefix(line, "files:") {
+		kind = clipFiles
+		line = line[len("files:"):]
 	}
 	data, err := base64.StdEncoding.DecodeString(line)
 	if err != nil {

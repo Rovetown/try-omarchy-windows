@@ -1,0 +1,34 @@
+From 3bdc4b6af73783d7ff5a005df30857c06146ea0d Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 14:54:28 -0400
+Subject: [PATCH] Notify when a file clipboard transfer cannot complete
+
+---
+ guest/factory-overlay/usr/local/bin/clipboard-files | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-files b/guest/factory-overlay/usr/local/bin/clipboard-files
+index d7134b8..8f36c1d 100755
+--- a/guest/factory-overlay/usr/local/bin/clipboard-files
++++ b/guest/factory-overlay/usr/local/bin/clipboard-files
+@@ -5,6 +5,7 @@ import os
+ from pathlib import Path, PurePosixPath
+ import shutil
+ import stat
++import subprocess
+ import sys
+ import tempfile
+ import urllib.parse
+@@ -212,4 +213,9 @@ if __name__ == '__main__':
+         sys.stdout.buffer.write(result)
+     except (ValueError, OSError, zipfile.BadZipFile, zlib.error, UnicodeError) as error:
+         print(f'File clipboard: {error}', file=sys.stderr)
++        if shutil.which('notify-send') and os.environ.get('WAYLAND_DISPLAY'):
++            try:
++                subprocess.run(['notify-send', '-a', 'Try Omarchy', 'Files were not transferred', str(error)], timeout=3, check=False)
++            except (OSError, subprocess.TimeoutExpired):
++                pass
+         sys.exit(1)
+-- 
+2.55.0
+

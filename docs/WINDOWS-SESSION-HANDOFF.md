@@ -2,6 +2,10 @@
 
 Updated September 12, 2026. Start here before further release testing.
 
+A subsequent development candidate adds file clipboard, reclaim controls and
+Settings improvements. Read [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md)
+before testing: these changes require revision 18 and are not in signed v16.
+
 ## Current release state
 
 The signed `v0.0.16-preview` candidate is an unpublished GitHub draft with 13

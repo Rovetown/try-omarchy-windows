@@ -26,15 +26,18 @@ var (
 )
 
 const (
-	trayIconID          = 1
-	trayCallbackMessage = 0x8001 // WM_APP + 1
-	trayStopMessage     = 0x8002 // WM_APP + 2
-	trayCommandShow     = 3001
-	trayCommandShare    = 3002
-	trayCommandSettings = 3003
-	trayCommandDiagnose = 3004
-	trayCommandShutdown = 3005
-	trayCommandReclaim  = 3006
+	trayIconID                = 1
+	trayCallbackMessage       = 0x8001 // WM_APP + 1
+	trayStopMessage           = 0x8002 // WM_APP + 2
+	trayCommandShow           = 3001
+	trayCommandShare          = 3002
+	trayCommandSettings       = 3003
+	trayCommandDiagnose       = 3004
+	trayCommandShutdown       = 3005
+	trayCommandReclaim        = 3006
+	trayCommandReclaimStatus  = 3007
+	trayCommandHelp           = 3008
+	trayCommandClipboardFiles = 3009
 
 	nimAdd                = 0
 	nimDelete             = 2
@@ -212,9 +215,14 @@ func runTray(cfg trayLaunchConfig, ready chan<- uintptr, done chan<- struct{}) {
 		appendItem(mfSeparator, 0, "")
 		appendItem(mfString, trayCommandSettings, "Settings...")
 		appendItem(mfString, trayCommandDiagnose, "Create diagnostics...")
-		// Reclaim stays reachable through -reclaim only until a physical run
-		// has watched the disk file grow and shrink; then this line returns.
-		// appendItem(mfString, trayCommandReclaim, "Reclaim disk space...")
+		reclaimFlags := uintptr(mfString)
+		if !reclaimSupported.Load() {
+			reclaimFlags |= mfGray
+		}
+		appendItem(reclaimFlags, trayCommandReclaim, "Reclaim disk space...")
+		appendItem(reclaimFlags, trayCommandReclaimStatus, "Reclaim status...")
+		appendItem(mfString, trayCommandClipboardFiles, "Open received files")
+		appendItem(mfString, trayCommandHelp, "Help and shortcuts...")
 		appendItem(mfSeparator, 0, "")
 		appendItem(mfString, trayCommandShutdown, "Shut down Omarchy...")
 
@@ -237,9 +245,28 @@ func runTray(cfg trayLaunchConfig, ready chan<- uintptr, done chan<- struct{}) {
 		case trayCommandDiagnose:
 			launchControl("-diagnostics", &diagnosticsOpen)
 		case trayCommandReclaim:
-			if msgBox("Give deleted Omarchy files' space back to Windows?\n\nOmarchy will write zeros over its free space now, which takes a few minutes and briefly fills its disk. The disk file on Windows shrinks the next time Omarchy shuts down.", mbYesNo|mbIconQuestion|mbDefbutton2) == idYes {
-				if !requestReclaim() {
-					infoBox("Omarchy is not ready for this yet. It needs the current guest update, a moment after startup, and at least 4 GiB free on the Windows drive; try again shortly.")
+			if msgBox("Give deleted Omarchy files' space back to Windows?\n\nOmarchy will prepare up to 8 GiB of free space per pass. This temporarily uses Windows disk space while keeping a 4 GiB reserve. The disk file on Windows shrinks the next time Omarchy shuts down.", mbYesNo|mbIconQuestion|mbDefbutton2) == idYes {
+				if err := requestReclaimError(); err != nil {
+					infoBox(err.Error())
+				} else {
+					infoBox("Preparing free space. Keep Omarchy running. Choose Reclaim status from the tray to check when it is ready to shut down.")
+				}
+			}
+		case trayCommandReclaimStatus:
+			if a := theAgent.Load(); a != nil {
+				infoBox(a.reclaimStatus())
+			} else {
+				infoBox("Omarchy is not ready yet.")
+			}
+		case trayCommandHelp:
+			infoBox(everydayHelp)
+		case trayCommandClipboardFiles:
+			if dir, err := clipboardFilesCache(); err == nil {
+				if err = os.MkdirAll(dir, 0700); err == nil {
+					cmd := exec.Command("explorer.exe", dir)
+					if cmd.Start() == nil {
+						_ = cmd.Process.Release()
+					}
 				}
 			}
 		case trayCommandShutdown:
