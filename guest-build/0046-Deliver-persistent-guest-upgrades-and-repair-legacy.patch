@@ -1,0 +1,805 @@
+From a9dfb1c915e7886650f364c0e12ca8ba93e99fba Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 03:56:42 -0400
+Subject: [PATCH] Deliver persistent guest upgrades and repair legacy system
+ files
+
+---
+ .../try-omarchy-update-repository.service     |   1 +
+ .../try-omarchy-system-ownership.service      |   1 +
+ .../try-omarchy-system-ownership.service      |  15 ++
+ .../try-omarchy-update-repository.service     |  13 ++
+ .../try-omarchy-factory-update-notice.service |   1 -
+ .../lib/try-omarchy/publish-update-repository | 136 +++++++++++++++++
+ .../local/lib/try-omarchy/repair-icon-names   |  34 +++++
+ .../lib/try-omarchy/repair-system-ownership   |  38 +++++
+ .../try-omarchy/show-factory-update-notice    |  12 +-
+ guest/scripts/configure-rootfs.sh             |  15 +-
+ guest/scripts/finalize-rootfs.sh              |  26 +++-
+ guest/scripts/materialize-omarchy.sh          |   7 +-
+ guest/scripts/register-omarchy-runtime.sh     |   8 +-
+ guest/spec.json                               |   5 +-
+ guest/tests/test_icon_names.py                |  51 +++++++
+ guest/tests/test_system_ownership.py          |  44 ++++++
+ guest/tests/test_update_repository.py         | 143 ++++++++++++++++++
+ guest/tests/verify.py                         |  10 +-
+ 18 files changed, 542 insertions(+), 18 deletions(-)
+ create mode 120000 guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-update-repository.service
+ create mode 120000 guest/factory-overlay/etc/systemd/system/sysinit.target.wants/try-omarchy-system-ownership.service
+ create mode 100644 guest/factory-overlay/etc/systemd/system/try-omarchy-system-ownership.service
+ create mode 100644 guest/factory-overlay/etc/systemd/system/try-omarchy-update-repository.service
+ create mode 100755 guest/factory-overlay/usr/local/lib/try-omarchy/publish-update-repository
+ create mode 100755 guest/factory-overlay/usr/local/lib/try-omarchy/repair-icon-names
+ create mode 100755 guest/factory-overlay/usr/local/lib/try-omarchy/repair-system-ownership
+ create mode 100644 guest/tests/test_icon_names.py
+ create mode 100644 guest/tests/test_system_ownership.py
+ create mode 100644 guest/tests/test_update_repository.py
+
+diff --git a/guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-update-repository.service b/guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-update-repository.service
+new file mode 120000
+index 0000000..866ddc2
+--- /dev/null
++++ b/guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-update-repository.service
+@@ -0,0 +1 @@
++../try-omarchy-update-repository.service
+\ No newline at end of file
+diff --git a/guest/factory-overlay/etc/systemd/system/sysinit.target.wants/try-omarchy-system-ownership.service b/guest/factory-overlay/etc/systemd/system/sysinit.target.wants/try-omarchy-system-ownership.service
+new file mode 120000
+index 0000000..10ebf53
+--- /dev/null
++++ b/guest/factory-overlay/etc/systemd/system/sysinit.target.wants/try-omarchy-system-ownership.service
+@@ -0,0 +1 @@
++../try-omarchy-system-ownership.service
+\ No newline at end of file
+diff --git a/guest/factory-overlay/etc/systemd/system/try-omarchy-system-ownership.service b/guest/factory-overlay/etc/systemd/system/try-omarchy-system-ownership.service
+new file mode 100644
+index 0000000..40fd0f8
+--- /dev/null
++++ b/guest/factory-overlay/etc/systemd/system/try-omarchy-system-ownership.service
+@@ -0,0 +1,15 @@
++[Unit]
++Description=Repair system files inherited from older guest builds
++DefaultDependencies=no
++After=local-fs.target
++Before=sysinit.target systemd-tmpfiles-setup.service try-omarchy-update-repository.service try-omarchy-browser-policy.service
++ConditionPathExists=/usr/share/try-omarchy/system-owned-paths
++
++[Service]
++Type=oneshot
++ExecStart=/usr/local/lib/try-omarchy/repair-system-ownership
++ExecStart=/usr/local/lib/try-omarchy/repair-icon-names
++RemainAfterExit=yes
++
++[Install]
++WantedBy=sysinit.target
+diff --git a/guest/factory-overlay/etc/systemd/system/try-omarchy-update-repository.service b/guest/factory-overlay/etc/systemd/system/try-omarchy-update-repository.service
+new file mode 100644
+index 0000000..98fee90
+--- /dev/null
++++ b/guest/factory-overlay/etc/systemd/system/try-omarchy-update-repository.service
+@@ -0,0 +1,13 @@
++[Unit]
++Description=Publish the Try Omarchy guest package update
++After=local-fs.target
++Before=display-manager.service try-omarchy-ready.service
++ConditionPathExists=/usr/share/try-omarchy/update-repository/manifest.json
++
++[Service]
++Type=oneshot
++ExecStart=/usr/local/lib/try-omarchy/publish-update-repository
++RemainAfterExit=yes
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/guest/factory-overlay/etc/systemd/user/try-omarchy-factory-update-notice.service b/guest/factory-overlay/etc/systemd/user/try-omarchy-factory-update-notice.service
+index 1a5f647..1f1600d 100644
+--- a/guest/factory-overlay/etc/systemd/user/try-omarchy-factory-update-notice.service
++++ b/guest/factory-overlay/etc/systemd/user/try-omarchy-factory-update-notice.service
+@@ -1,7 +1,6 @@
+ [Unit]
+ Description=Explain a preserved Try Omarchy guest after a factory update
+ ConditionPathExists=/var/lib/try-omarchy/factory-update-available
+-ConditionPathExists=!%h/.local/state/try-omarchy/factory-update-notice-shown
+ After=graphical-session.target
+ 
+ [Service]
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/publish-update-repository b/guest/factory-overlay/usr/local/lib/try-omarchy/publish-update-repository
+new file mode 100755
+index 0000000..c4428c1
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/publish-update-repository
+@@ -0,0 +1,136 @@
++#!/usr/bin/env python3
++"""Publish the image's verified local packages without changing installed packages."""
++import fcntl
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import stat
++import subprocess
++import tarfile
++import tempfile
++
++DATABASE = 'try-omarchy.db.tar.gz'
++
++
++def regular(path):
++    if not stat.S_ISREG(path.lstat().st_mode):
++        raise ValueError(f'not a regular file: {path}')
++
++
++def trusted_directory(path):
++    for parent in [path, *path.parents]:
++        if not stat.S_ISDIR(parent.lstat().st_mode):
++            raise ValueError(f'not a real directory: {parent}')
++
++
++def digest(path):
++    with path.open('rb') as stream:
++        return hashlib.file_digest(stream, 'sha256').hexdigest()
++
++
++def runtime_version(database):
++    regular(database)
++    with tarfile.open(database, 'r:gz') as archive:
++        versions = []
++        for entry in archive:
++            if not entry.isfile() or not entry.name.endswith('/desc'):
++                continue
++            if entry.size > 65536:
++                raise ValueError('oversized repository metadata')
++            data = archive.extractfile(entry).read().decode().splitlines()
++            fields = {data[i]: data[i + 1] for i in range(len(data) - 1)
++                      if data[i].startswith('%')}
++            if fields.get('%NAME%') == 'try-omarchy-runtime':
++                versions.append(fields.get('%VERSION%', ''))
++        if len(versions) != 1 or not versions[0]:
++            raise ValueError('repository must contain one Omarchy runtime')
++        return versions[0]
++
++
++def atomic_copy(source, destination):
++    # Files and package archives are durable before the database points at them.
++    fd, temporary = tempfile.mkstemp(prefix='.publish-', dir=destination.parent)
++    try:
++        with os.fdopen(fd, 'wb') as output, source.open('rb') as input_file:
++            shutil.copyfileobj(input_file, output)
++            output.flush()
++            os.fchmod(output.fileno(), 0o644)
++            os.fsync(output.fileno())
++        os.replace(temporary, destination)
++        directory = os.open(destination.parent, os.O_DIRECTORY | os.O_RDONLY)
++        try:
++            os.fsync(directory)
++        finally:
++            os.close(directory)
++    finally:
++        if os.path.lexists(temporary):
++            os.unlink(temporary)
++
++
++def publish(source, destination):
++    trusted_directory(source)
++    trusted_directory(destination)
++    manifest_file = source / 'manifest.json'
++    regular(manifest_file)
++    if manifest_file.stat().st_size > 65536:
++        raise ValueError('oversized update manifest')
++    manifest = json.loads(manifest_file.read_text())
++    files = manifest.get('files', {})
++    if manifest.get('schema') != 1 or not isinstance(files, dict) or DATABASE not in files:
++        raise ValueError('invalid update manifest')
++    if not 2 <= len(files) <= 10:
++        raise ValueError('invalid update file count')
++    for name, expected in files.items():
++        if (Path(name).name != name or name.startswith('.') or
++                not (name == DATABASE or name.endswith('.pkg.tar.zst'))):
++            raise ValueError('unsafe update filename')
++        candidate = source / name
++        regular(candidate)
++        if candidate.stat().st_size != expected['size'] or digest(candidate) != expected['sha256']:
++            raise ValueError(f'incomplete or corrupt update payload: {name}')
++    offered = runtime_version(source / DATABASE)
++    if offered != manifest.get('runtimeVersion'):
++        raise ValueError('runtime version differs from manifest')
++    database = destination / DATABASE
++    if os.path.lexists(database):
++        current = runtime_version(database)
++        order = int(subprocess.check_output(['vercmp', offered, current], text=True).strip())
++        if order < 0:
++            print(f'Keeping newer Omarchy repository {current}')
++            return
++        if order == 0 and digest(database) != files[DATABASE]['sha256']:
++            raise ValueError('different repositories use the same runtime version')
++    alias = destination / 'try-omarchy.db'
++    if not alias.is_symlink() or os.readlink(alias) != DATABASE:
++        raise ValueError('local repository database link was changed')
++    # Validate every existing path before any write. Never replace an archive
++    # with different bytes under the same filename, or follow a planted link.
++    for name, expected in files.items():
++        target = destination / name
++        if os.path.lexists(target):
++            regular(target)
++            if name != DATABASE and digest(target) != expected['sha256']:
++                raise ValueError(f'existing package differs: {name}')
++    for name in sorted(files):
++        if name != DATABASE and not (destination / name).exists():
++            atomic_copy(source / name, destination / name)
++    # Old archives are deliberately retained. A pacman process that read the
++    # old database can finish, and interruption before this rename is harmless.
++    if not database.exists() or digest(database) != files[DATABASE]['sha256']:
++        atomic_copy(source / DATABASE, database)
++    print(f'Omarchy {offered} is available through Update > Omarchy')
++
++
++def main():
++    if os.geteuid() != 0:
++        raise SystemExit('Run this helper as root')
++    with open('/run/try-omarchy-update-repository.lock', 'w') as guard:
++        fcntl.flock(guard, fcntl.LOCK_EX)
++        publish(Path('/usr/share/try-omarchy/update-repository'),
++                Path('/usr/share/try-omarchy/repo'))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/repair-icon-names b/guest/factory-overlay/usr/local/lib/try-omarchy/repair-icon-names
+new file mode 100755
+index 0000000..1444fbc
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/repair-icon-names
+@@ -0,0 +1,34 @@
++#!/usr/bin/env python3
++"""Normalize unchanged image icons to the names used by upstream desktop files."""
++import hashlib
++from pathlib import Path
++import stat
++
++
++def real_directory(path):
++    return all(stat.S_ISDIR(p.lstat().st_mode) for p in (path, *path.parents))
++
++
++def repair(reference, icons):
++    if not real_directory(reference) or not real_directory(icons):
++        raise ValueError('icon paths must be real directories')
++    for original in reference.iterdir():
++        name = original.name.lower().replace(' ', '-')
++        if name == original.name or not stat.S_ISREG(original.lstat().st_mode):
++            continue
++        old, new = icons / original.name, icons / name
++        if not old.exists() or not stat.S_ISREG(old.lstat().st_mode):
++            continue
++        # Only relocate the exact source image. Administrator replacements and
++        # an existing target are left untouched for manual review.
++        if new.exists() or new.is_symlink():
++            continue
++        if hashlib.sha256(old.read_bytes()).digest() != hashlib.sha256(original.read_bytes()).digest():
++            continue
++        old.rename(new)
++        print(f'Renamed image icon: {old.name} -> {new.name}')
++
++
++if __name__ == '__main__':
++    repair(Path('/usr/share/omarchy/applications/icons'),
++           Path('/usr/share/icons/hicolor/256x256/apps'))
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/repair-system-ownership b/guest/factory-overlay/usr/local/lib/try-omarchy/repair-system-ownership
+new file mode 100755
+index 0000000..6a25a1b
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/repair-system-ownership
+@@ -0,0 +1,38 @@
++#!/usr/bin/env python3
++"""Repair builder-owned overlay paths without following guest symlinks."""
++import os
++from pathlib import Path, PurePosixPath
++
++
++def repair(root, paths):
++    for name in paths:
++        path = PurePosixPath(name)
++        if not path.is_absolute() or '..' in path.parts or (name != '/' and path.parts[1] not in ('etc', 'usr')):
++            raise ValueError(f'unsafe managed system path: {name}')
++    for name in paths:
++        parts = PurePosixPath(name).parts[1:]
++        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        try:
++            if not parts:
++                info = os.fstat(fd)
++                if info.st_uid or info.st_gid:
++                    os.fchown(fd, 0, 0)
++                continue
++            try:
++                for part in parts[:-1]:
++                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
++                    os.close(fd)
++                    fd = child
++                info = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
++                if info.st_uid or info.st_gid:
++                    os.chown(parts[-1], 0, 0, dir_fd=fd, follow_symlinks=False)
++            except (FileNotFoundError, NotADirectoryError):
++                # Missing or redirected managed paths are not permission repairs.
++                continue
++        finally:
++            os.close(fd)
++
++
++if __name__ == '__main__':
++    paths = Path('/usr/share/try-omarchy/system-owned-paths').read_text().splitlines()
++    repair('/', paths)
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice b/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice
+index 51dfc38..7231b50 100755
+--- a/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice
+@@ -1,9 +1,15 @@
+ #!/bin/bash
+ set -euo pipefail
+ 
++systemctl is-active --quiet try-omarchy-update-repository.service || exit 0
++
+ state="$HOME/.local/state/try-omarchy/factory-update-notice-shown"
++version=$(python3 -c 'import json; print(json.load(open("/usr/share/try-omarchy/update-repository/manifest.json"))["runtimeVersion"])')
++installed=$(pacman -Q try-omarchy-runtime | cut -d ' ' -f2)
++[[ $(vercmp "$version" "$installed") -gt 0 ]] || exit 0
++[[ $(cat "$state" 2>/dev/null || true) != "$version" ]] || exit 0
+ mkdir -p "$(dirname "$state")"
+ notify-send -a "Try Omarchy" -u normal -t 20000 \
+-  "Your existing Omarchy system was preserved" \
+-  "The launcher integration was updated without replacing your files or installed OS. To use the newest factory image and packages, run try-omarchy-export first, then start Try Omarchy with -fresh."
+-touch "$state"
++  "Omarchy update available" \
++  "Your files and settings were preserved. Open Update > Omarchy to install the desktop update. You do not need to reset this installation."
++printf '%s\n' "$version" >"$state"
+diff --git a/guest/scripts/configure-rootfs.sh b/guest/scripts/configure-rootfs.sh
+index 410c196..02e11ab 100755
+--- a/guest/scripts/configure-rootfs.sh
++++ b/guest/scripts/configure-rootfs.sh
+@@ -57,13 +57,24 @@ profile=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["guest
+ [[ $profile == factory ]] || fail "native guest profile must be factory"
+ 
+ mkdir -p "$root/etc" "$root/etc/skel" "$root/usr/share/try-omarchy"
+-cp -a "$guest_dir/factory-overlay/." "$root/"
++cp -a --no-preserve=ownership "$guest_dir/factory-overlay/." "$root/"
+ 
+ # Session-config customizations are additive, so each fragment remains
+ # independently auditable against Basecamp's pinned config. The display
+ # fragment keeps the guest mode synchronized when QEMU changes the virtual
+ # EDID.
+-cp -a "$guest_dir/native-overlay/." "$root/"
++cp -a --no-preserve=ownership "$guest_dir/native-overlay/." "$root/"
++# Git checkouts belong to the builder, not to a guest user. Record the exact
++# overlaid paths so older images can repair that ownership without recursing
++# through user data or following redirected system directories.
++python3 - "$guest_dir" "$root" <<'SYSTEM_PATHS'
++import pathlib, sys
++guest, root = map(pathlib.Path, sys.argv[1:])
++paths = {'/'}
++for overlay in (guest / 'factory-overlay', guest / 'native-overlay'):
++    paths.update('/' + str(p.relative_to(overlay)) for p in overlay.rglob('*'))
++(root / 'usr/share/try-omarchy/system-owned-paths').write_text('\n'.join(sorted(paths)) + '\n')
++SYSTEM_PATHS
+ chmod 0755 "$root/usr/local/bin/omarchy-native-display-sync"
+ cat "$guest_dir/fragments/hypr-monitors-qemu.append.lua" >>"$root/etc/skel/.config/hypr/monitors.lua"
+ 
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index c4b2cf6..fd149ef 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -57,7 +57,31 @@ update-desktop-database /usr/share/applications || true
+ # the initramfs so disks created by older releases gain matching SSH, share,
+ # export, lifecycle, and readiness behavior without touching user data or
+ # attempting a full package upgrade.
++# Deliver the local packages with the authenticated image integration. This
++# stages an offer only; normal Omarchy Update remains the package transaction.
++update_repo=/usr/share/try-omarchy/update-repository
++install -d -m 0755 "$update_repo"
++cp /usr/share/try-omarchy/repo/*.pkg.tar.zst "$update_repo/"
++cp /usr/share/try-omarchy/repo/try-omarchy.db.tar.gz "$update_repo/"
++python3 - "$update_repo" <<'UPDATE_MANIFEST'
++import hashlib, json, pathlib, subprocess, sys
++root = pathlib.Path(sys.argv[1])
++files = {p.name: {"size": p.stat().st_size, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
++         for p in sorted(root.iterdir()) if p.name != "manifest.json"}
++version = subprocess.check_output(["pacman", "-Q", "try-omarchy-runtime"], text=True).split()[1]
++(root / "manifest.json").write_text(json.dumps({"schema": 1, "runtimeVersion": version, "files": files}, sort_keys=True) + "\n")
++UPDATE_MANIFEST
++
+ compat_paths=(
++  usr/share/try-omarchy/system-owned-paths
++  usr/local/lib/try-omarchy/repair-icon-names
++  usr/local/lib/try-omarchy/repair-system-ownership
++  etc/systemd/system/try-omarchy-system-ownership.service
++  etc/systemd/system/sysinit.target.wants/try-omarchy-system-ownership.service
++  usr/share/try-omarchy/update-repository
++  usr/local/lib/try-omarchy/publish-update-repository
++  etc/systemd/system/try-omarchy-update-repository.service
++  etc/systemd/system/multi-user.target.wants/try-omarchy-update-repository.service
+   usr/share/try-omarchy/omarchy-theme-browser
+   usr/local/lib/try-omarchy/repair-browser-policy
+   etc/systemd/system/try-omarchy-browser-policy.service
+@@ -98,7 +122,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=13
++compat_revision=14
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/scripts/materialize-omarchy.sh b/guest/scripts/materialize-omarchy.sh
+index 6114c74..191569e 100755
+--- a/guest/scripts/materialize-omarchy.sh
++++ b/guest/scripts/materialize-omarchy.sh
+@@ -99,14 +99,14 @@ copy_tree() {
+   local to=$2
+   rm -rf "$to"
+   mkdir -p "$(dirname "$to")"
+-  cp -a "$from" "$to"
++  cp -a --no-preserve=ownership "$from" "$to"
+ }
+ 
+ copy_contents() {
+   local from=$1
+   local to=$2
+   mkdir -p "$to"
+-  cp -a "$from/." "$to/"
++  cp -a --no-preserve=ownership "$from/." "$to/"
+ }
+ 
+ install_file() {
+@@ -234,7 +234,8 @@ install_file 0440 "$source_dir/etc/sudoers.d/omarchy-theme-browser" "$root/usr/s
+ # provider. A single scalable hicolor location works for these demo assets.
+ mkdir -p "$root/usr/share/icons/hicolor/256x256/apps"
+ while IFS= read -r icon; do
+-  install_file 0644 "$icon" "$root/usr/share/icons/hicolor/256x256/apps/$(basename "$icon")"
++  icon_name=$(basename "$icon" | tr '[:upper:] ' '[:lower:]-')
++  install_file 0644 "$icon" "$root/usr/share/icons/hicolor/256x256/apps/$icon_name"
+ done < <(find "$source_dir/applications/icons" -maxdepth 1 -type f | sort)
+ install_file 0644 "$source_dir/icon.png" "$root/usr/share/pixmaps/omarchy.png"
+ install_file 0644 "$source_dir/icon.png" "$root/usr/share/icons/hicolor/256x256/apps/omarchy.png"
+diff --git a/guest/scripts/register-omarchy-runtime.sh b/guest/scripts/register-omarchy-runtime.sh
+index 7270d41..2f696b6 100755
+--- a/guest/scripts/register-omarchy-runtime.sh
++++ b/guest/scripts/register-omarchy-runtime.sh
+@@ -88,7 +88,9 @@ source_date_epoch=${metadata[3]}
+ [[ $(<"$root/usr/share/omarchy/version") == "$version" ]] || fail "staged version differs from spec"
+ 
+ package_name=try-omarchy-runtime
+-package_version="$version-1"
++package_release=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["upstream"].get("packageRelease", 1))' "$spec")
++[[ $package_release =~ ^[1-9][0-9]*$ ]] || fail "invalid package release"
++package_version="$version-$package_release"
+ stage=$(mktemp -d "$work/omarchy-runtime-package.XXXXXX")
+ cleanup() {
+   rm -rf "$stage"
+@@ -115,6 +117,8 @@ while IFS= read -r relative; do
+   cp -a "$root/$relative" "$stage/$relative"
+ done <"$root/usr/share/try-omarchy/runtime-config-files"
+ 
++chmod 0750 "$stage/etc/sudoers.d"
++
+ installed_size=$(python3 - "$stage" <<'PY'
+ import os
+ import pathlib
+@@ -140,6 +144,8 @@ size = $installed_size
+ arch = any
+ license = MIT
+ provides = omarchy=$version
++depend = pamixer
++depend = playerctl
+ EOF
+ 
+ while IFS= read -r relative; do
+diff --git a/guest/spec.json b/guest/spec.json
+index 3b75c6b..9bfd58f 100644
+--- a/guest/spec.json
++++ b/guest/spec.json
+@@ -5,7 +5,7 @@
+     "filesystem": "ext4",
+     "filesystemLabel": "omarchy-factory",
+     "filesystemUuid": "89054943-1f4e-4f14-b934-d6db3fba4254",
+-    "sizeMiB": 6144,
++    "sizeMiB": 7168,
+     "sourceDateEpoch": 1787652758
+   },
+   "guest": {
+@@ -29,7 +29,8 @@
+     "version": "4.0.3",
+     "versionFile": "4.0.0.alpha",
+     "channel": "quattro",
+-    "license": "MIT"
++    "license": "MIT",
++    "packageRelease": 2
+   },
+   "supplyChain": {
+     "omarchyPackagesRepository": "https://github.com/omacom-io/omarchy-pkgs",
+diff --git a/guest/tests/test_icon_names.py b/guest/tests/test_icon_names.py
+new file mode 100644
+index 0000000..e3ee451
+--- /dev/null
++++ b/guest/tests/test_icon_names.py
+@@ -0,0 +1,51 @@
++import importlib.machinery
++import importlib.util
++from pathlib import Path
++import tempfile
++import unittest
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/lib/try-omarchy/repair-icon-names'
++loader = importlib.machinery.SourceFileLoader('icons', str(SCRIPT))
++spec = importlib.util.spec_from_loader(loader.name, loader)
++module = importlib.util.module_from_spec(spec)
++loader.exec_module(module)
++
++
++class IconNamesTests(unittest.TestCase):
++    def setUp(self):
++        tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(tmp.cleanup)
++        self.root = Path(tmp.name)
++        self.source = self.root / 'reference'
++        self.icons = self.root / 'icons'
++        self.source.mkdir()
++        self.icons.mkdir()
++        (self.source / 'Google Maps.png').write_bytes(b'original image')
++        self.old = self.icons / 'Google Maps.png'
++        self.new = self.icons / 'google-maps.png'
++        self.old.write_bytes(b'original image')
++
++    def test_unchanged_icon_is_renamed_and_retry_is_harmless(self):
++        module.repair(self.source, self.icons)
++        module.repair(self.source, self.icons)
++        self.assertFalse(self.old.exists())
++        self.assertEqual(self.new.read_bytes(), b'original image')
++
++    def test_custom_icon_is_preserved(self):
++        self.old.write_bytes(b'my image')
++        module.repair(self.source, self.icons)
++        self.assertEqual(self.old.read_bytes(), b'my image')
++        self.assertFalse(self.new.exists())
++
++    def test_existing_target_is_preserved(self):
++        self.new.write_bytes(b'existing image')
++        module.repair(self.source, self.icons)
++        self.assertTrue(self.old.exists())
++        self.assertEqual(self.new.read_bytes(), b'existing image')
++
++    def test_redirected_directory_is_rejected(self):
++        alias = self.root / 'alias'
++        alias.symlink_to(self.icons, target_is_directory=True)
++        with self.assertRaises(ValueError):
++            module.repair(self.source, alias)
++        self.assertTrue(self.old.exists())
+diff --git a/guest/tests/test_system_ownership.py b/guest/tests/test_system_ownership.py
+new file mode 100644
+index 0000000..145f88e
+--- /dev/null
++++ b/guest/tests/test_system_ownership.py
+@@ -0,0 +1,44 @@
++import importlib.machinery
++import importlib.util
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/lib/try-omarchy/repair-system-ownership'
++loader = importlib.machinery.SourceFileLoader('ownership', str(SCRIPT))
++spec = importlib.util.spec_from_loader(loader.name, loader)
++module = importlib.util.module_from_spec(spec)
++loader.exec_module(module)
++
++
++class SystemOwnershipTests(unittest.TestCase):
++    def test_only_named_paths_are_repaired(self):
++        with tempfile.TemporaryDirectory() as tmp, patch.object(module.os, 'chown') as chown:
++            root = Path(tmp)
++            (root / 'etc').mkdir()
++            (root / 'etc/managed').write_text('keep contents')
++            (root / 'etc/custom').write_text('keep ownership')
++            module.repair(root, ['/etc/managed'])
++            self.assertEqual(chown.call_count, int(os.getuid() != 0 or os.getgid() != 0))
++            if chown.called:
++                self.assertEqual(chown.call_args.args, ('managed', 0, 0))
++                self.assertFalse(chown.call_args.kwargs['follow_symlinks'])
++            self.assertEqual((root / 'etc/managed').read_text(), 'keep contents')
++
++    def test_redirected_parent_is_not_followed(self):
++        with tempfile.TemporaryDirectory() as tmp, patch.object(module.os, 'chown') as chown:
++            root = Path(tmp)
++            (root / 'outside').mkdir()
++            (root / 'outside/file').write_text('untouched')
++            (root / 'etc').symlink_to(root / 'outside', target_is_directory=True)
++            module.repair(root, ['/etc/file'])
++            chown.assert_not_called()
++
++    def test_unsafe_paths_fail_before_any_change(self):
++        for bad in ('/home/user/file', '/etc/../home/file', 'etc/file'):
++            with self.subTest(bad=bad), patch.object(module.os, 'open') as opened:
++                with self.assertRaises(ValueError):
++                    module.repair('/', ['/etc', bad])
++                opened.assert_not_called()
+diff --git a/guest/tests/test_update_repository.py b/guest/tests/test_update_repository.py
+new file mode 100644
+index 0000000..6a6154b
+--- /dev/null
++++ b/guest/tests/test_update_repository.py
+@@ -0,0 +1,143 @@
++import hashlib
++import importlib.machinery
++import importlib.util
++import io
++import json
++from pathlib import Path
++import tarfile
++import tempfile
++import unittest
++from unittest.mock import patch
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/lib/try-omarchy/publish-update-repository'
++loader = importlib.machinery.SourceFileLoader('update_repo', str(SCRIPT))
++spec = importlib.util.spec_from_loader(loader.name, loader)
++module = importlib.util.module_from_spec(spec)
++loader.exec_module(module)
++
++
++def database(path, version):
++    content = f'%NAME%\ntry-omarchy-runtime\n\n%VERSION%\n{version}\n'.encode()
++    with tarfile.open(path, 'w:gz') as archive:
++        entry = tarfile.TarInfo(f'try-omarchy-runtime-{version}/desc')
++        entry.size = len(content)
++        archive.addfile(entry, io.BytesIO(content))
++
++
++class UpdateRepositoryTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.tmp.cleanup)
++        self.root = Path(self.tmp.name)
++        self.source = self.root / 'source'
++        self.target = self.root / 'target'
++        self.source.mkdir()
++        self.target.mkdir()
++        self.old = self.target / 'try-omarchy-runtime-4.0.2-1-any.pkg.tar.zst'
++        self.old.write_bytes(b'old package')
++        database(self.target / module.DATABASE, '4.0.2-1')
++        (self.target / 'try-omarchy.db').symlink_to(module.DATABASE)
++        self.package = 'try-omarchy-runtime-4.0.3-2-any.pkg.tar.zst'
++        (self.source / self.package).write_bytes(b'new package')
++        database(self.source / module.DATABASE, '4.0.3-2')
++        self.manifest()
++        # No system package manager is involved in these publication tests.
++        self.comparator = patch.object(module.subprocess, 'check_output', return_value='1\n')
++        self.comparator.start()
++        self.addCleanup(self.comparator.stop)
++
++    def manifest(self):
++        files = {p.name: {'size': p.stat().st_size,
++                         'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
++                 for p in self.source.iterdir() if p.name != 'manifest.json'}
++        (self.source / 'manifest.json').write_text(json.dumps({
++            'schema': 1, 'runtimeVersion': '4.0.3-2', 'files': files}))
++
++    def publish(self):
++        module.publish(self.source, self.target)
++
++    def test_publishes_and_retains_old_archives(self):
++        self.publish()
++        self.assertEqual(module.runtime_version(self.target / module.DATABASE), '4.0.3-2')
++        self.assertEqual(self.old.read_bytes(), b'old package')
++        self.assertEqual((self.target / self.package).read_bytes(), b'new package')
++        self.assertEqual(list(self.target.glob('.publish-*')), [])
++
++    def test_interruption_before_database_keeps_old_repository_and_retry_finishes(self):
++        real_copy = module.atomic_copy
++        def fail_database(source, target):
++            if target.name == module.DATABASE:
++                raise OSError('simulated interruption')
++            real_copy(source, target)
++        with patch.object(module, 'atomic_copy', side_effect=fail_database):
++            with self.assertRaises(OSError):
++                self.publish()
++        self.assertEqual(module.runtime_version(self.target / module.DATABASE), '4.0.2-1')
++        self.assertTrue((self.target / self.package).exists())
++        self.publish()
++        self.assertEqual(module.runtime_version(self.target / module.DATABASE), '4.0.3-2')
++
++    def test_corrupt_payload_publishes_nothing(self):
++        before = (self.target / module.DATABASE).read_bytes()
++        (self.source / self.package).write_bytes(b'corrupted')
++        with self.assertRaises(ValueError):
++            self.publish()
++        self.assertFalse((self.target / self.package).exists())
++        self.assertEqual((self.target / module.DATABASE).read_bytes(), before)
++
++    def test_rejects_downgrade(self):
++        with patch.object(module.subprocess, 'check_output', return_value='-1\n'):
++            self.publish()
++        self.assertEqual(module.runtime_version(self.target / module.DATABASE), '4.0.2-1')
++        self.assertFalse((self.target / self.package).exists())
++
++    def test_same_version_different_database_is_not_republished(self):
++        with patch.object(module.subprocess, 'check_output', return_value='0\n'):
++            with self.assertRaises(ValueError):
++                self.publish()
++
++    def test_repeated_publication_is_idempotent(self):
++        self.publish()
++        with patch.object(module.subprocess, 'check_output', return_value='0\n'), \
++             patch.object(module, 'atomic_copy', side_effect=AssertionError('unexpected write')):
++            self.publish()
++
++    def test_preserves_modified_archive_and_database(self):
++        (self.target / self.package).write_bytes(b'custom')
++        with self.assertRaises(ValueError):
++            self.publish()
++        self.assertEqual((self.target / self.package).read_bytes(), b'custom')
++        self.assertEqual(module.runtime_version(self.target / module.DATABASE), '4.0.2-1')
++
++    def test_rejects_destination_symlink(self):
++        outside = self.root / 'outside'
++        outside.write_bytes(b'keep')
++        (self.target / self.package).symlink_to(outside)
++        with self.assertRaises(ValueError):
++            self.publish()
++        self.assertEqual(outside.read_bytes(), b'keep')
++
++    def test_rejects_changed_database_alias(self):
++        (self.target / 'try-omarchy.db').unlink()
++        (self.target / 'try-omarchy.db').symlink_to('custom.db')
++        with self.assertRaises(ValueError):
++            self.publish()
++
++    def test_atomic_copy_failure_keeps_destination_and_cleans_temporary(self):
++        before = (self.target / module.DATABASE).read_bytes()
++        with patch.object(module.os, 'replace', side_effect=OSError('rename failed')):
++            with self.assertRaises(OSError):
++                module.atomic_copy(self.source / module.DATABASE, self.target / module.DATABASE)
++        self.assertEqual((self.target / module.DATABASE).read_bytes(), before)
++        self.assertEqual(list(self.target.glob('.publish-*')), [])
++
++    def test_rejects_path_traversal(self):
++        manifest = json.loads((self.source / 'manifest.json').read_text())
++        manifest['files']['../outside.pkg.tar.zst'] = manifest['files'][self.package]
++        (self.source / 'manifest.json').write_text(json.dumps(manifest))
++        with self.assertRaises(ValueError):
++            self.publish()
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index a1e081e..cf23a61 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=13" in finalize_rootfs
++        "compat_revision=14" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+@@ -306,11 +306,11 @@ def main() -> None:
+     update_notice_unit = read(GUEST / "factory-overlay/etc/systemd/user/try-omarchy-factory-update-notice.service")
+     check(
+         "factory-update-available" in update_notice_unit
+-        and "-fresh" in update_notice
+-        and "try-omarchy-export" in update_notice
+-        and update_notice.index("notify-send") < update_notice.index('touch "$state"')
++        and "Update > Omarchy" in update_notice
++        and "You do not need to reset" in update_notice
++        and "vercmp" in update_notice
+         and (GUEST / "factory-overlay/etc/systemd/user/graphical-session.target.wants/try-omarchy-factory-update-notice.service").is_symlink(),
+-        "older persistent guests explain that the factory OS was preserved",
++        "older persistent guests offer an in-place desktop update",
+     )
+ 
+     finalizer = read(GUEST / "scripts/finalize-rootfs.sh")
+-- 
+2.55.0
+

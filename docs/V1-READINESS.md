@@ -5,6 +5,18 @@ still needs the checks below; the open work is tracked in one place, GitHub
 issue #77. A passing build does not establish hardware or
 upgrade reliability.
 
+## Current guest completion work
+
+- [ ] Complete the Omarchy 4.0.3 candidate, including personalized setup and
+  existing-guest browser repair (#89).
+- [ ] Reproduce the package lock report (#90) and verify update interruption
+  behavior. The candidate build now rejects a locked package database.
+- [ ] Provide and validate in-place upgrades for the locally pinned Omarchy
+  runtime package on existing guests, preserving files and configuration.
+
+See [the September completion audit](audits/2026-09-12-completion.md) for source
+changes, configuration differences and the remaining acceptance work.
+
 ## Runtime and release validation
 
 - [ ] Validate the source-built runtime on physical Windows hardware, including full Hyper-V. Record archive hashes and results using
