@@ -7,6 +7,9 @@ upgrade reliability.
 
 The [v0.0.15 candidate report](PREVIEW-15-VALIDATION.md) records the signed
 Windows VM checks and the remaining physical acceptance.
+The [migration and disk growth report](MIGRATION-17-VALIDATION.md) records
+subsequent revision 17 testing. Those fixes are merged but are not in the
+existing signed draft.
 
 ## Current guest completion work
 
