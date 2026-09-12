@@ -268,3 +268,35 @@ files, refuses live runtime sockets and removes only stale control sockets.
 Linux race tests and native Windows tests pass for private connections, path
 validation, live-owner protection, stale recovery and the USB manager. The native
 PowerShell connection, status command and key-forwarder compilation also pass.
+
+### Saved-session storage and runtime repair
+
+The saved-session backend copies a paused disk through QEMU's block graph,
+including QCOW2 backing data, then captures RAM and device state over a private
+filesystem socket. It publishes the disk/RAM pair with checksums and an exact
+machine/runtime identity only after both transfers finish. Resume verification
+rejects changed runtime, machine, architecture, metadata or contents and holds
+read handles while preparing an independent resume disk. Failed writes remain
+in private staging for recovery.
+
+A native Windows test preserved disk data and an unsaved RAM buffer across the
+source process exiting and a new receiving QEMU process. Cancellation, backing
+chains, checksum rejection and preserved originals also passed. These tests use
+TCG and a small controlled machine; launcher lifecycle and accelerated session
+preservation remain in implementation.
+
+Runtime recipe r5 fixes a Windows socket-handle protection bug that prevented
+migration receivers from observing EOF. Build run 34721269877 passed USB and
+memory round-trip smoke tests, and its downloaded archives passed source and
+binary verification. The same archived runtime passed the native launcher
+saved-session and private-control tests.
+
+The source audit also found WHPX's migration blocker in
+`target/i386/whpx/whpx-all.c`: it cites CPUID, dirty tracking and XSAVE state.
+This requires an accelerated preservation implementation alongside the virgl
+graphics-state work. Neither blocker is removed to make a capability check pass.
+
+The full native Windows suite passed on the interactive desktop with the r5
+runtime, including real QEMU window discovery, three-window lifecycle, USB UI
+and denial of writes/replacement while saved-session data is verified. Linux
+race tests, Windows vet and the ARM64 launcher cross-build also pass.

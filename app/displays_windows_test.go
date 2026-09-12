@@ -15,8 +15,8 @@ import (
 
 func TestNativeQEMUPrimaryWindow(t *testing.T) {
 	tool := os.Getenv("QEMU_SYSTEM")
-	if tool == "" {
-		t.Skip("QEMU_SYSTEM selects the Windows runtime")
+	if tool == "" || os.Getenv("TRYOMARCHY_NATIVE_UI_TEST") != "1" {
+		t.Skip("requires QEMU_SYSTEM and an interactive Windows desktop")
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -69,7 +69,7 @@ func TestNativeQEMUPrimaryWindow(t *testing.T) {
 // Secondary SDL windows appear when the guest activates their scanouts. Exercise
 // the native window lifecycle independently of guest boot and acceleration.
 func TestMultipleNativeDisplayWindowLifecycle(t *testing.T) {
-	if os.Getenv("QEMU_SYSTEM") == "" && os.Getenv("TRYOMARCHY_NATIVE_UI_TEST") != "1" {
+	if os.Getenv("TRYOMARCHY_NATIVE_UI_TEST") != "1" {
 		t.Skip("requires an interactive Windows desktop")
 	}
 	runtime.LockOSThread()

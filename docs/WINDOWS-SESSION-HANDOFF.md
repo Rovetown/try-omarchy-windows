@@ -2,11 +2,23 @@
 
 Updated September 12, 2026. Start here before further release testing.
 
-Use **v0.0.17-preview** for the next combined testing round. It includes file
-clipboard, reclaim controls and scrolling Settings, with compatibility revision
-18. Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for exact artifacts
-and completed checks, and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for
-the test matrix. Signed v16 does not include these features.
+The full-feature work is on `codex/full-feature-completion`. Read
+[FULL-FEATURE-COMPLETION.md](FULL-FEATURE-COMPLETION.md) first for implementation
+and acceptance evidence. The signed **v0.0.17-preview** is the regression
+baseline; it predates the active snapshot rollback, portable lifecycle,
+multi-display, LAN, USB and saved-session work on that branch.
+
+The latest source-built runtime is recipe r5 from
+[build 34721269877](https://github.com/omacom/try-omarchy-windows/actions/runs/34721269877).
+Its USB and RAM restore smokes passed, and the archives were verified against
+the pinned source recipe. In the nested lab it is extracted to
+`D:\TryOmarchyFullFeaturesTest\runtime-r5`. The runtime archive SHA256 is
+`618525d054aa2407d042c1a2a45a4ec8a9d95802259d77f62fdbd1110f3888e4`.
+Keep it separate from signed release payloads. A final integrated signed candidate will be prepared after feature
+implementation and regression checks.
+
+Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for the signed baseline
+artifacts and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for its test matrix.
 
 ## Current release state
 
