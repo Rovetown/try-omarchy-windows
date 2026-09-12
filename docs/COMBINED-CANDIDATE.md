@@ -8,7 +8,7 @@ remain unchanged.
 
 The guest extends the image validated by #92 with lock authentication repair
 and the current signed package transaction. It uses runtime `4.0.3-3`,
-compatibility revision 15, Chromium `153.0.8010.36-1`, Hyprland `0.56.2-3` and
+compatibility revision 16, Chromium `153.0.8010.36-1`, Hyprland `0.56.2-3` and
 gpu-screen-recorder `6.1.2-1`. The combined payload retains published WINQ-EMU
 Alpha 10; the source-built runtime is a separate hardware-validation gate.
 The earlier image passed a full 4.0.2 to 4.0.3 upgrade and five boot checks.
@@ -16,7 +16,7 @@ The earlier image passed a full 4.0.2 to 4.0.3 upgrade and five boot checks.
 The combined payload checksum-list SHA256 is:
 
 ```text
-982e012b84869d65ad94633c6d7c06ab1b93d672f402aeedddca1893a7ff1570
+bec7e21f74364e1137203861c6c91f6f4ac271dfa08fc7511598a517a86a44fa
 ```
 
 It includes the guest's checked artifacts and the runtime/source archives from
@@ -45,7 +45,7 @@ explicit test data directory:
 ```powershell
 .\TryOmarchy-runtime-test.exe -dir 'D:\Omarchy Candidate' -no-update `
   -release http://TEST-HOST:18081/payload `
-  -sums-sha256 982e012b84869d65ad94633c6d7c06ab1b93d672f402aeedddca1893a7ff1570
+  -sums-sha256 bec7e21f74364e1137203861c6c91f6f4ac271dfa08fc7511598a517a86a44fa
 ```
 
 The release environment currently permits only `master`. No branch policy was
@@ -62,7 +62,7 @@ The workflow uploads a test artifact and does not create or publish a release.
 - All 228 native launcher tests passed on Windows 11 Enterprise build 26200.
   The idle-download test now holds the response open until cancellation instead
   of depending on a short server sleep, which was unreliable on the busy VM.
-- Guest patch reconstruction, 76 guest tests, and 13 release-helper tests passed.
+- Guest patch reconstruction, 80 guest tests, and 13 release-helper tests passed.
 - All four PowerShell workflow blocks passed Windows PowerShell syntax checks.
 - The unsigned combined launcher booted Omarchy 4.0.3 to its desktop in the
   Windows VM. Terminal and shared-folder access worked, with no failed user
@@ -98,8 +98,16 @@ The workflow uploads a test artifact and does not create or publish a release.
 - A Windows payload update was deliberately interrupted immediately after
   activation, before guest readiness. The next launch restored the prior
   receipt and payload, booted successfully, cleared the pending state, and
-  preserved both saved documents. This tests guest payload recovery using an
+  preserved both saved documents. This sequence used the revision 15 payload,
+  before the notification retry fix. It tests guest payload recovery using an
   unsigned launcher; it does not validate signed launcher-update rollback.
+- Windows also booted and committed the updated payload after recovery,
+  preserving both documents. Its repaired lock screen rejected an incorrect
+  password and unlocked with the correct one. A startup race in the update
+  notice surfaced during this test: notifications were not yet available.
+  Patch 0049 bounds retries and records delivery only on success. With the
+  shell deliberately stopped and restarted later, delivery succeeded and
+  no user services remained failed.
 - The Windows VM has Hypervisor Platform enabled, but the full Hyper-V feature
   is disabled. This is nested-VM evidence, not physical-hardware acceptance.
 
