@@ -1,5 +1,14 @@
 --- a/hw/usb/host-libusb.c
 +++ b/hw/usb/host-libusb.c
+@@ -101,7 +101,7 @@
+     int                              seen, errcount;
+     int                              bus_num;
+     int                              addr;
+-    char                             port[16];
++    char                             port[32];
+ 
+     int                              hostfd;
+     libusb_device                    *dev;
 @@ -1237,7 +1237,7 @@
          (s->match.addr && s->match.bus_num &&
           !s->match.vendor_id && !s->match.product_id && !s->match.port)) {

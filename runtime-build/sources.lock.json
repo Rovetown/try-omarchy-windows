@@ -32,7 +32,7 @@
       },
       {
         "file": "patches/qemu/0006-preserve-complete-usb-port-identities.patch",
-        "sha256": "4ea808e8f3194e4496a6ff7fe29c44a816c58d1e82d61911e9c76407521ae049"
+        "sha256": "f9f89d8454d7bc9cba96f967f4905c9534d5a4210a74404ea933c5727f694f47"
       }
     ]
   },
