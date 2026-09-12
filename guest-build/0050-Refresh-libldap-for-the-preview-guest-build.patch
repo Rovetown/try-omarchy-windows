@@ -1,0 +1,25 @@
+From a76bf45f06952d655d18d2ba43bd7db8d187ba55 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 09:35:31 -0400
+Subject: [PATCH] Refresh libldap for the preview guest build
+
+---
+ guest/packages.lock.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/guest/packages.lock.json b/guest/packages.lock.json
+index e6275ae..5aed34c 100644
+--- a/guest/packages.lock.json
++++ b/guest/packages.lock.json
+@@ -285,7 +285,7 @@
+     "libksba": "1.8.1-1",
+     "liblc3": "1.1.3-2",
+     "libldac": "2.0.2.6-1",
+-    "libldap": "2.6.13-1",
++    "libldap": "2.7.1-1",
+     "liblqr": "0.4.3-1",
+     "liblsan": "16.2.1+r23+gd564253eb6c8-1",
+     "libluv": "1.52.1-1",
+-- 
+2.55.0
+
