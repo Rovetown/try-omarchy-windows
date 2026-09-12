@@ -7,12 +7,14 @@ upgrade reliability.
 
 ## Current guest completion work
 
-- [ ] Complete the Omarchy 4.0.3 candidate, including personalized setup and
-  existing-guest browser repair (#89).
+- [x] Complete the Omarchy 4.0.3 software candidate, including personalized setup,
+  lock authentication and existing-guest browser repair (#89). Merged in #93;
+  see [candidate evidence](COMBINED-CANDIDATE.md).
 - [ ] Reproduce the package lock report (#90) and verify update interruption
   behavior. The candidate build now rejects a locked package database.
-- [ ] Provide and validate in-place upgrades for the locally pinned Omarchy
+- [x] Provide and validate in-place upgrades for the locally pinned Omarchy
   runtime package on existing guests, preserving files and configuration.
+  Exact signed-candidate acceptance remains below.
 
 See [the September completion audit](audits/2026-09-12-completion.md) for source
 changes, configuration differences and the remaining acceptance work.
@@ -21,9 +23,9 @@ changes, configuration differences and the remaining acceptance work.
 
 - [ ] Validate the source-built runtime on physical Windows hardware, including full Hyper-V. Record archive hashes and results using
   [RUNTIME-VALIDATION.md](RUNTIME-VALIDATION.md).
-- [ ] Pin the tested runtime and matching source archive in
-  `guest-build/runtime.lock.json`, then verify the runtime packaged in the
-  release candidate.
+- [x] Pin the source-built runtime and matching source archive in
+  `guest-build/runtime.lock.json`. The published archives match source revision 3
+  and the current build recipe. Physical matrix acceptance remains open.
 - [ ] Verify signed draft preparation and publication using
   [RELEASING.md](RELEASING.md). A successful signing check alone does not
   establish that the full release workflow works.

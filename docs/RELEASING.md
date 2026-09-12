@@ -29,8 +29,9 @@ role on the signing account. The workflow itself requests only `id-token: write`
 and `contents: write` in the protected publish job.
 
 The optional `signing-check` phase builds, signs, and verifies the current
-launcher without creating or modifying a release. Use it after changing the
-OIDC or signing configuration.
+launcher and signed update metadata without creating or modifying a release.
+It requires the matching source pin and includes `test-update.json` in the
+artifact for verification. Use it after changing the OIDC or signing configuration.
 
 ## Prepare the guest
 
