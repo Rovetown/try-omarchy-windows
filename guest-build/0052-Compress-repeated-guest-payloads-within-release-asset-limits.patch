@@ -1,0 +1,26 @@
+From 4f0eb18af167a834616723c04bae14f937f89c24 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 11:27:06 -0400
+Subject: [PATCH] Compress repeated guest payloads within release asset limits
+
+---
+ guest/scripts/pack-image.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/guest/scripts/pack-image.sh b/guest/scripts/pack-image.sh
+index 114e865..c41fca7 100755
+--- a/guest/scripts/pack-image.sh
++++ b/guest/scripts/pack-image.sh
+@@ -89,7 +89,8 @@ if [[ -f $root/usr/share/try-omarchy/packages.lock.txt ]]; then
+   install -m 0644 "$root/usr/share/try-omarchy/packages.lock.txt" "$output/packages.lock.txt"
+ fi
+ 
+-zstd --force --quiet -12 --threads=0 "$raw" -o "$compressed"
++# Match repeated runtime payloads without exceeding the launcher decoder window.
++zstd --force --quiet -12 --long=28 --threads=0 "$raw" -o "$compressed"
+ python3 "$guest_dir/scripts/write-guest-manifest.py" --directory "$output" --spec "$spec"
+ 
+ (
+-- 
+2.55.0
+
