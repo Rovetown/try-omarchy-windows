@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.17-preview
 
 - Add file and folder copy/paste between Windows and Omarchy, with bounded
   snapshots and preserved originals.
