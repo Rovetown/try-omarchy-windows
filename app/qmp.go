@@ -2,8 +2,11 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"io"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -12,8 +15,10 @@ import (
 // qmp_capabilities exchange counts as "QEMU is alive" (the launch watchdog
 // depends on that distinction).
 type qmpConn struct {
-	tcp net.Conn
-	r   *bufio.Reader
+	tcp       net.Conn
+	lines     *bufio.Scanner
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func qmpConnect(port int, readTimeout time.Duration) *qmpConn {
@@ -27,34 +32,33 @@ func qmpConnect(port int, readTimeout time.Duration) *qmpConn {
 		logf("qmp %d: dial: %v", port, err)
 		return nil
 	}
-	c := &qmpConn{tcp: tcp, r: bufio.NewReader(tcp)}
-	tcp.SetReadDeadline(time.Now().Add(readTimeout))
-	if _, err := c.r.ReadString('\n'); err != nil { // greeting
-		logf("qmp %d: greeting: %v", port, err)
-		tcp.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	client, err := newQMPClient(ctx, tcp)
+	if err != nil {
+		logf("qmp %d: handshake: %v", port, err)
 		return nil
 	}
-	if _, err := tcp.Write([]byte("{\"execute\":\"qmp_capabilities\"}\n")); err != nil {
-		logf("qmp %d: caps write: %v", port, err)
-		tcp.Close()
-		return nil
-	}
-	tcp.SetReadDeadline(time.Now().Add(readTimeout))
-	if _, err := c.r.ReadString('\n'); err != nil { // {"return":{}}
-		logf("qmp %d: caps read: %v", port, err)
-		tcp.Close()
-		return nil
-	}
-	tcp.SetReadDeadline(time.Time{})
-	return c
+	// The typed client reads synchronously, so its bounded scanner can now
+	// become the supervisor's continuous event stream without another reader.
+	return &qmpConn{tcp: tcp, lines: client.lines, done: make(chan struct{})}
 }
 
 func (c *qmpConn) writeLine(s string) error {
-	_, err := c.tcp.Write([]byte(s + "\n"))
+	if err := c.tcp.SetWriteDeadline(time.Now().Add(8 * time.Second)); err != nil {
+		return err
+	}
+	data := []byte(s + "\n")
+	n, err := c.tcp.Write(data)
+	if err == nil && n != len(data) {
+		return io.ErrShortWrite
+	}
 	return err
 }
 
-func (c *qmpConn) close() { c.tcp.Close() }
+func (c *qmpConn) close() {
+	c.closeOnce.Do(func() { close(c.done); c.tcp.Close() })
+}
 
 // readLines pumps every QMP line (events and command returns alike) into the
 // returned channel and closes it when the stream ends. Keeping a read
@@ -65,12 +69,10 @@ func (c *qmpConn) readLines() <-chan string {
 	ch := make(chan string, 16)
 	go func() {
 		defer close(ch)
-		for {
-			line, err := c.r.ReadString('\n')
-			if line != "" {
-				ch <- line
-			}
-			if err != nil {
+		for c.lines.Scan() {
+			select {
+			case ch <- c.lines.Text():
+			case <-c.done:
 				return
 			}
 		}

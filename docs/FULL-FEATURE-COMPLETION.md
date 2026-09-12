@@ -300,3 +300,8 @@ The full native Windows suite passed on the interactive desktop with the r5
 runtime, including real QEMU window discovery, three-window lifecycle, USB UI
 and denial of writes/replacement while saved-session data is verified. Linux
 race tests, Windows vet and the ARM64 launcher cross-build also pass.
+
+The rebuilt runtime also passed the complete current Omarchy 4.0.3 guest smoke
+under Windows TCG, including trial provisioning and compatibility revision 18.
+Control streams now share the bounded, acknowledged handshake and stop their
+reader when closed, including a full delivery queue during VM restart.

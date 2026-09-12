@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"os/exec"
@@ -74,6 +75,27 @@ func TestQMPWindowsUnixSocketRuntime(t *testing.T) {
 		t.Fatal("replaced a live runtime socket")
 	}
 	client.Close()
+	supervisor := qmpConnect(qmpToolsPort, 5*time.Second)
+	if supervisor == nil {
+		t.Fatal("supervisor private handshake failed")
+	}
+	defer supervisor.close()
+	lines := supervisor.readLines()
+	if err := supervisor.writeLine(`{"execute":"query-status"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case line := <-lines:
+		var response struct {
+			Return vmRuntimeStatus `json:"return"`
+		}
+		if err := json.Unmarshal([]byte(line), &response); err != nil || response.Return.Status != "prelaunch" {
+			t.Fatalf("supervisor status: %s %v", line, err)
+		}
+	case <-ctx.Done():
+		t.Fatal("supervisor did not receive status")
+	}
+	supervisor.close()
 	cmd.Process.Kill()
 	cmd.Wait()
 	if _, err := prepareQMPControl(); err != nil {
