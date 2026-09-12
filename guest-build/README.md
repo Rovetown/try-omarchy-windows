@@ -18,7 +18,7 @@ What the patches change (the original graphics path was proven on hardware
 2026-08-28; later additions are covered by contract, release-smoke, and nested
 Windows VM tests unless noted in the release checklist):
 
-- Omarchy pin bumped to the v4.0.2 release tag, staged runtime stamped 4.0.2
+- Omarchy pin bumped to the v4.0.3 release tag, staged runtime stamped 4.0.3
   (upstream's `version` file lags its tags)
 - Omarchy repository packages must be signed, as in upstream 4.0.2; the builder
   trusts the vendored Omarchy packaging key by fingerprint
@@ -73,8 +73,9 @@ If Arch has moved since the lock was written, refresh it first and review the di
 `scripts/release/refresh-guest-lock.sh` does the whole dance: it checks out the
 locked source, applies the patches, resolves the lock in Docker, and writes the
 next numbered `Refresh-the-guest-package-lock` patch here when anything changed.
-The `Refresh guest lock` workflow runs it every Monday and opens a pull request
-with the package changes; `--check` reports drift without writing a patch.
+The `Refresh guest lock` workflow runs it every Monday and opens a draft pull request
+with the package changes. If GitHub policy blocks bot PRs, its run summary links
+to the generated branch for manual review; `--check` reports drift without writing a patch.
 
 ```bash
 scripts/release/refresh-guest-lock.sh

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Updated the factory guest to Omarchy 4.0.3 and refreshed its locked packages.
+- Added missing browser theme permissions and machine policy setup, with a repair for older guests. Included upstream system defaults and media-control tools.
+- Added image checks for package database locks and passwordless browser theme writes.
+- Guest package refreshes now create draft PRs and retain a review link when GitHub blocks automatic PR creation.
+
+Existing Omarchy package upgrades and Windows candidate validation remain pending.
+
 ## v0.0.14-preview - 2026-09-05
 
 ### Features
