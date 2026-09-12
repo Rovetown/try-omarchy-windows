@@ -2,30 +2,31 @@
 
 Updated September 12, 2026. Start here before further release testing.
 
-A subsequent development candidate adds file clipboard, reclaim controls and
-Settings improvements. Read [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md)
-before testing: these changes require revision 18 and are not in signed v16.
+Use **v0.0.17-preview** for the next combined testing round. It includes file
+clipboard, reclaim controls and scrolling Settings, with compatibility revision
+18. Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for exact artifacts
+and completed checks, and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for
+the test matrix. Signed v16 does not include these features.
 
 ## Current release state
 
-The signed `v0.0.16-preview` candidate is an unpublished GitHub draft with 13
-assets. Its source is `aa66dea9fe5ac95ede0dfaf358f55936f00205f1`, not the newer
-documentation commits. PR #104 merged the latest validation report at
-`61afa0efec15dc46e78c372ca3100d47f856357f`. Public latest remains v0.0.14-preview
-as last checked. Recheck live state before acting.
+The signed v0.0.17-preview candidate remains an unpublished draft. Its launcher
+source is `3869987b35f556e779f132c722c258fd14bf5687`. PR #106 contains the feature
+implementation, #107 pins the guest, and #108 fixes Settings scrolling. Public latest
+remains v0.0.14-preview as last checked. Recheck live state before acting.
 
-- Omarchy 4.0.3, runtime package 4.0.3-3, guest compatibility revision 17.
-- Launcher SHA256: `b5046d62f0c74d643be0abae3482a223034b5284e231e42bda30c0658c38f128`.
-- SHA256SUMS digest: `76bd981fe756653ccd79e4ebd22afbc4c20a7442946d500ce8de7864fd8c06f9`.
-- Raw rootfs SHA256: `544f5db2a363454d3ccacf78e7de90c58e219d71c99e05649810b1d84a23482a`.
-- [Guest preparation](https://github.com/omacom/try-omarchy-windows/actions/runs/34707042607) and [signing](https://github.com/omacom/try-omarchy-windows/actions/runs/34707526208) succeeded.
+- Omarchy 4.0.3, runtime package 4.0.3-3, guest compatibility revision 18.
+- Launcher SHA256: `5b53cfbe4cbe551bb2ef54f4aa643d109e8c2d123c08564293f4d04c545b84a3`.
+- SHA256SUMS digest: `dd880c291739ae3ea9311109568cb0e8008c3f0ba77c9bcaeed5609f1f719e1d`.
+- Raw rootfs SHA256: `96bf7666837654e1bb7db4abdedeff379d7b344181c0a71ce73bd61c18d0a26d`.
+- [Guest preparation](https://github.com/omacom/try-omarchy-windows/actions/runs/34713001736) and [signing](https://github.com/omacom/try-omarchy-windows/actions/runs/34713854531) succeeded.
 
-Read [PREVIEW-16-VALIDATION.md](PREVIEW-16-VALIDATION.md) for completed checks,
-[RUNTIME-VALIDATION.md](RUNTIME-VALIDATION.md) for physical coverage, and
+Read [RUNTIME-VALIDATION.md](RUNTIME-VALIDATION.md) for physical coverage and
 [RELEASING.md](RELEASING.md) before publication. NEXT-RELEASE.md is an older
-planning snapshot, not the current candidate status.
+planning snapshot. The following v16 results are baseline evidence, not a
+substitute for the combined v17 Windows round.
 
-## What passed
+## Earlier v16 Windows results
 
 Fresh signed installation, existing-guest upgrade, reboot, sandboxed Chromium,
 configuration export, and persistence checks passed in a nested Windows VM.
@@ -68,7 +69,7 @@ a physical test PC. No physical test PC was provided in the previous session.
 
 1. Confirm `gh api user --jq .login` is `btsouth`. Always use that GitHub account.
 2. Read the current release and validation documents. Download the exact signed
-   launcher from the signing run above and all draft assets with authenticated
+   launcher from the v17 draft or signing run above and all draft assets with authenticated
    GitHub access. Verify the launcher and manifest digests above and Windows
    Authenticode before running. Do not rebuild and silently substitute a binary.
 3. Follow RELEASING.md's local asset server procedure. Draft URLs return 404 to
@@ -83,7 +84,7 @@ a physical test PC. No physical test PC was provided in the previous session.
    packages/themes and excluded VM-specific state. AUR acceptance remains open.
 6. Resolve failures with focused changes, independent review, and exact-candidate
    retesting. Keep the draft unpublished until pre-publication hardware gates pass.
-7. Check anonymous v16 assets and tagged/latest signed feeds during controlled
+7. Check anonymous v17 assets and tagged/latest signed feeds during controlled
    publication. Separately prove pre-transfer updates and old-preview-to-stable
    migration through both feeds before v1. Preserve the signed legacy repository
    URL used by the update bridge; do not rewrite it as a cosmetic cleanup.
@@ -105,6 +106,8 @@ The lab is Docker container `omarchy-windows`, SSH on loopback port 2222 via
 
 Key evidence filenames:
 
+- `preview17-asset-validation.json`, `preview17-signed-metadata-validation.json`, `preview17-signature.json`
+- `preview17-settings-validation.json`, `preview17-linux-evidence/`, `signed-preview17/`
 - `preview16-asset-validation.json`, `preview16-signed-metadata-validation.json`, `preview16-signature.json`
 - `preview16-fresh-result.txt`, `preview16-upgrade-result.txt`, `preview16-reboot-result.txt`
 - `real-restore-result.txt`, `preview16-authenticated-draft-check.json`
@@ -124,7 +127,8 @@ Windows test installations, all retained:
 - `D:\TryOmarchyPreview16Fresh`: signed v16 fresh/reboot tests, cowsay and Catppuccin installed for export.
 - `D:\TryOmarchyCandidate`: upgraded v16 with original persistence documents.
 - `D:\TryOmarchyPreview15Fresh`: earlier revision 17/disk-growth tests.
-- Signed launchers: `D:\CandidateTools\TryOmarchy-preview15.exe` and `TryOmarchy-preview16.exe`.
+- Signed launchers: `D:\CandidateTools\TryOmarchy-preview15.exe`, `TryOmarchy-preview16.exe` and `TryOmarchy-preview17.exe`.
+- `D:\TryOmarchyCompletionUI`: isolated Settings test folder, with no guest disk.
 
 Dedicated D: test volume was expanded from 64 to 96 GiB without deleting files.
 Its host image is `/data/windows-vm/try-omarchy-candidate-20260912.img`.

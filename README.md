@@ -20,9 +20,9 @@ The Omarchy mark in the app icon is sourced from the
 [official Omarchy brand kit](https://omarchy.org/brand/) and remains subject to
 Omarchy's trademark rights.
 
-The [next development candidate](docs/COMPLETION-CANDIDATE.md) adds file
-copy/paste, reclaim controls and Settings improvements. These changes are not
-in the published preview or the existing signed v16 draft.
+The [signed v0.0.17 candidate](docs/PREVIEW-17-VALIDATION.md) adds file
+copy/paste, reclaim controls and Settings improvements. It remains an unpublished
+draft pending combined Windows acceptance. The published preview is unchanged.
 
 ## What works today
 

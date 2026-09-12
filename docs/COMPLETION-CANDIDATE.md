@@ -6,6 +6,9 @@ v16 baseline. It is not included
 in the existing v16 draft executable or image. Guest compatibility revision 18
 is required for file clipboard transfer and the safer reclaim agent.
 
+The [signed candidate report](PREVIEW-17-VALIDATION.md) identifies the matching
+launcher and image and records the later upgrade regression.
+
 ## Implemented
 
 - Two-way file and folder clipboard snapshots. Explorer CF_HDROP and Wayland
