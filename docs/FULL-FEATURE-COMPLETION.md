@@ -175,3 +175,28 @@ loopback and a selected host LAN address. Both runs passed with the v17 guest
 under KVM. This verifies the QEMU forwarding path; native Windows firewall tests
 and the interactive Add LAN dialog also passed. The expanded Settings window
 passed the 500-pixel work-area keyboard and scrolling checks again.
+
+### USB attachment implementation
+
+The running VM's tray now opens a native USB device manager with discovery,
+refresh, explicit attach and release. The broker checks current bus/address,
+physical port and vendor/product identity, creates the guest controller as
+needed and waits for removal before reporting release. Reopening the manager
+reads ownership from QEMU. Unplugged attachments remain releasable.
+
+The runtime recipe now enables libusb, includes its DLL and adds an explicit
+attachment mode that checks identity and opens the device before acknowledging
+success. This mode does not automatically claim a replacement after unplugging.
+A source fix bounds USB port-path formatting; a compiled fixture checks long,
+empty and failed paths without touching hardware. CI checks the device models,
+explicit-attachment property, failed-device cleanup and packaged dependencies.
+
+Broker regressions and the native Windows manager refresh/close test pass.
+Hardware USB, driver compatibility and webcam acceptance remain in the
+integrated device work. The new runtime build is separate from the signed
+release baseline.
+
+Live display tracking also detects monitor topology changes and restores an
+output that is no longer visible. The native three-window fixture passes
+recovery after simulated monitor removal while leaving deliberate window
+placement alone when the monitor layout has not changed.

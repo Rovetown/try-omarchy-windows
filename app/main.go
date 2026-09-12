@@ -153,6 +153,7 @@ func main() {
 	firewallPlan := flag.String("firewall-plan", "", "internal: apply owned LAN firewall rules")
 	flag.BoolVar(&cfg.lanPublic, "lan-public", false, "allow explicitly selected LAN forwards on public networks")
 	sshPort := flag.Int("ssh", 0, "forward this Windows loopback port to Omarchy's sshd and start sshd for the session")
+	openDevices := flag.Bool("devices", false, "manage USB devices in the running VM")
 	recoveryAction := flag.String("recovery", "", "open backup, restore, snapshots, portable-create, reset, move, or uninstall controls")
 	uninstall := flag.Bool("uninstall", false, "remove this Try Omarchy installation: shortcuts, the Apps & features entry, and the data folder")
 	uninstallFinish := flag.Bool("uninstall-finish", false, "internal: delete the data folder after the launcher inside it exits")
@@ -178,6 +179,12 @@ func main() {
 	updateWaitPID := flag.Int("update-wait-pid", 0, "internal: process to wait for before replacing the launcher")
 	updateRestartArgs := flag.String("update-restart-args", "", "internal: encoded launcher restart arguments")
 	flag.Parse()
+	if *openDevices {
+		if err := runUSBDeviceUI(); err != nil {
+			fatal("Could not open USB devices: %v", err)
+		}
+		return
+	}
 	if *uninstall {
 		if *recoveryAction != "" && *recoveryAction != "uninstall" {
 			fatal("Choose one recovery action: backup, restore, reset, or uninstall.")
