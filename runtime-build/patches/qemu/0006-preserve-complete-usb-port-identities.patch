@@ -1,0 +1,29 @@
+--- a/hw/usb/host-libusb.c
++++ b/hw/usb/host-libusb.c
+@@ -1237,7 +1237,7 @@
+         (s->match.addr && s->match.bus_num &&
+          !s->match.vendor_id && !s->match.product_id && !s->match.port)) {
+         struct libusb_device_descriptor descriptor;
+-        char port[16];
++        char port[32];
+ 
+         if (!s->match.addr) {
+             error_setg(errp, "hostaddr is required without auto-reconnect");
+@@ -1895,7 +1895,7 @@
+                     continue;
+                 }
+                 if (f->port != NULL) {
+-                    char port[16] = "-";
++                    char port[32] = "-";
+                     usb_host_get_port(devs[i], port, sizeof(port));
+                     if (strcmp(f->port, port) != 0) {
+                         continue;
+@@ -1955,7 +1955,7 @@
+ {
+     libusb_device **devs = NULL;
+     struct libusb_device_descriptor ddesc;
+-    char port[16];
++    char port[32];
+     int i, n;
+ 
+     if (usb_host_init() != 0) {

@@ -157,7 +157,7 @@ func capturePausedVMState(ctx context.Context, c *qmpClient, path string, progre
 		defer conn.Close()
 		stop := context.AfterFunc(transferCtx, func() { conn.Close() })
 		defer stop()
-		_, err = io.Copy(f, io.LimitReader(conn, int64(memory.Base+memory.Plugged)+diskSpaceReserve))
+		err = copySavedMemoryStream(f, conn, int64(memory.Base+memory.Plugged)+diskSpaceReserve)
 		done <- err
 		if err != nil {
 			cancel()
@@ -202,6 +202,20 @@ draining:
 	}
 
 	return hashSavedMemory(ctx, f)
+}
+
+// Read one byte beyond the budget so hitting the limit cannot masquerade as
+// the sender reaching EOF. A completed QMP command alone does not prove that
+// every buffered stream byte was retained.
+func copySavedMemoryStream(destination io.Writer, source io.Reader, limit int64) error {
+	n, err := io.Copy(destination, io.LimitReader(source, limit+1))
+	if err != nil {
+		return err
+	}
+	if n > limit {
+		return fmt.Errorf("saved memory exceeds its storage budget")
+	}
+	return nil
 }
 
 func hashSavedMemory(ctx context.Context, f *os.File) (savedMemoryFile, error) {

@@ -231,7 +231,7 @@ func (s *fileTransferService) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	s.mu.Lock()
 	job := s.jobs[parts[1]]
-	if job == nil || job.ticket.Direction != parts[0] || !s.now().Before(job.expires) || job.ctx.Err() != nil {
+	if job == nil || job.ticket.Direction != parts[0] || (job.status.State != "transferring" && job.activeDownloads == 0 && !s.now().Before(job.expires)) || job.ctx.Err() != nil {
 		s.mu.Unlock()
 		http.NotFound(w, r)
 		return

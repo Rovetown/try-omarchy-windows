@@ -315,3 +315,54 @@ func TestFileTransferServiceGuestClientRoundTrip(t *testing.T) {
 		t.Fatal("guest upload changed content", err)
 	}
 }
+
+func TestFileTransferServiceActiveUploadRetainsStatusAfterTicketExpiry(t *testing.T) {
+	service := newFileTransferService(t.TempDir(), transferTestLimits())
+	defer service.Close()
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.WriteFile(source, []byte("contents"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := service.Offer(context.Background(), []string{source}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming, err := service.AcceptReceive(ticket.Offer, filepath.Join(t.TempDir(), "Received"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(service)
+	defer server.Close()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "POST /upload/%s HTTP/1.1\r\nHost: localhost\r\nContent-Length: %d\r\n\r\nX", incoming.Token, ticket.Offer.ArchiveBytes)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		status, _ := service.Status(incoming.ID)
+		if status.State == "transferring" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("upload never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	service.mu.Lock()
+	service.jobs[incoming.Token].expires = time.Now().Add(-time.Second)
+	service.mu.Unlock()
+	response, err := server.Client().Get(server.URL + "/upload/" + incoming.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatalf("active upload status disappeared: %d", response.StatusCode)
+	}
+	var status fileTransferStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil || status.State != "transferring" {
+		t.Fatal(status, err)
+	}
+}

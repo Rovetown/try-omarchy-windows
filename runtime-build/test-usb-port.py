@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compile the runtime's real USB path formatter against boundary fixtures."""
 import argparse
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -9,6 +10,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("source", type=Path)
 args = parser.parse_args()
 source = args.source.read_text(encoding="utf-8")
+buffers = re.findall(r"char\s+port\[(\d+)\]", source)
+if not buffers or any(int(size) < 28 for size in buffers):
+    raise SystemExit("USB callers must preserve the full seven-level port identity")
 start = source.index("static int usb_host_get_port(")
 end = source.index("\nstatic void usb_host_libusb_error", start)
 function = source[start:end]

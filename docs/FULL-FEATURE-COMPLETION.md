@@ -348,3 +348,13 @@ first, including after a lost response. A guest-client round trip through the
 Go service passes with Unicode names and a repeated completed upload. The fresh
 patched guest contract passes 97 tests. Clipboard and drag adapters still need
 to distribute these tickets and present destination/progress controls.
+
+### Correctness review, September 12
+
+PR #110 had no posted comments or reviews when checked. The review found and
+fixed three boundary cases: active transfers losing their status after the
+idle ticket timeout, a saved-memory size limit being mistaken for stream EOF,
+and 16-byte USB identity buffers rejecting valid deeper hub paths. Runtime r6
+expands all three USB port buffers; the formatter test now checks caller sizes
+as well as truncation behavior. Runtime r5 remains the previously tested baseline
+until the r6 build and runtime tests finish.
