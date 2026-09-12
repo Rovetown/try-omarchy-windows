@@ -89,3 +89,26 @@ func TestTransferZIPDirectoryBoundsAndZIP64(t *testing.T) {
 		})
 	}
 }
+
+func FuzzTransferArchiveMetadata(f *testing.F) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	entry, err := writer.Create("document.txt")
+	if err != nil {
+		f.Fatal(err)
+	}
+	if _, err := entry.Write([]byte("preserved content")); err != nil {
+		f.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		f.Fatal(err)
+	}
+	f.Add(archive.Bytes())
+	f.Add([]byte("PK\x05\x06"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data) > 1<<20 {
+			t.Skip()
+		}
+		_, _ = inspectFileArchive(bytes.NewReader(data), int64(len(data)), 1024, 1<<20)
+	})
+}
