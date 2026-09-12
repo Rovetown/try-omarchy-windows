@@ -39,6 +39,8 @@ func beginRecoveryProgress(status string) {
 func runRecoveryUI(dir, action string) error {
 	configureSetupCancellation(false)
 	switch action {
+	case "snapshots":
+		return runCheckpointUI(dir)
 	case "move", "move-cleanup":
 		return runMoveUI(dir, action == "move-cleanup")
 	case "backup":

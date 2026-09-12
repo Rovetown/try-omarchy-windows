@@ -147,7 +147,7 @@ func main() {
 	var forwards forwardList
 	flag.Var(&forwards, "forward", "forward a Windows loopback port into Omarchy, as tcp:2222:22 or 8080:80 (repeatable)")
 	sshPort := flag.Int("ssh", 0, "forward this Windows loopback port to Omarchy's sshd and start sshd for the session")
-	recoveryAction := flag.String("recovery", "", "open backup, restore, reset, move, or uninstall controls for a stopped standard install")
+	recoveryAction := flag.String("recovery", "", "open backup, restore, snapshots, reset, move, or uninstall controls for a stopped standard install")
 	uninstall := flag.Bool("uninstall", false, "remove this Try Omarchy installation: shortcuts, the Apps & features entry, and the data folder")
 	uninstallFinish := flag.Bool("uninstall-finish", false, "internal: delete the data folder after the launcher inside it exits")
 	reclaim := flag.Bool("reclaim", false, "ask the running Omarchy to zero its free space so the disk file shrinks after shutdown, then exit")
@@ -179,8 +179,8 @@ func main() {
 		*recoveryAction = "uninstall"
 	}
 	maintenance := *backupPath != "" || *restorePath != "" || *recoveryAction != ""
-	if *recoveryAction != "" && (*recoveryAction != "backup" && *recoveryAction != "restore" && *recoveryAction != "reset" && *recoveryAction != "uninstall" && *recoveryAction != "move" && *recoveryAction != "move-cleanup" || *backupPath != "" || *restorePath != "") {
-		fatal("Choose one recovery action: backup, restore, reset, move, or uninstall.")
+	if *recoveryAction != "" && (*recoveryAction != "backup" && *recoveryAction != "restore" && *recoveryAction != "reset" && *recoveryAction != "uninstall" && *recoveryAction != "move" && *recoveryAction != "move-cleanup" && *recoveryAction != "snapshots" || *backupPath != "" || *restorePath != "") {
+		fatal("Choose one recovery action: backup, restore, snapshots, reset, move, or uninstall.")
 	}
 	if maintenance && (*backupPath != "" && *restorePath != "" || cfg.portable || cfg.fresh || *openSettings || *diagnostics || *enableWhp || *applyLauncherUpdateFlag || *applyLauncherRollbackFlag) {
 		fatal("Use one recovery action on a stopped standard install, without other maintenance options.")

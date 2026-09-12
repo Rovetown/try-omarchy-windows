@@ -60,6 +60,12 @@ func writeVMBackup(dir, destination string) error {
 }
 
 func writeVMBackupProgress(dir, destination string, report backupProgress) error {
+	return writeVMArchive(dir, destination, report, false)
+}
+
+// Internal checkpoints have a private staging directory excluded from the
+// archive inventory. Public backups still require an external destination.
+func writeVMArchive(dir, destination string, report backupProgress, checkpoint bool) error {
 	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err
@@ -78,7 +84,9 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 	}
 	rel, err := filepath.Rel(root, parent)
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("save the backup outside the Try Omarchy data folder")
+		if !checkpoint || filepath.Base(destination) != "vm.zip" || filepath.Dir(rel) != "checkpoints" || !strings.HasPrefix(filepath.Base(rel), ".pending-") || !validCheckpointID(strings.TrimPrefix(filepath.Base(rel), ".pending-")) {
+			return fmt.Errorf("save the backup outside the Try Omarchy data folder")
+		}
 	}
 
 	for _, name := range []string{payloadUpdateStateFilename, updateStateFilename} {
@@ -205,6 +213,10 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 }
 
 func readVMBackup(z *zip.ReadCloser) (backupManifest, map[string]*zip.File, error) {
+	return readVMBackupReader(&z.Reader)
+}
+
+func readVMBackupReader(z *zip.Reader) (backupManifest, map[string]*zip.File, error) {
 	var manifest backupManifest
 	files := map[string]*zip.File{}
 	names := map[string]bool{}
@@ -277,7 +289,14 @@ func restoreVMBackupProgress(source, destination string, report backupProgress) 
 		return err
 	}
 	defer z.Close()
-	manifest, files, err := readVMBackup(z)
+	return restoreVMBackupReader(&z.Reader, destination, report)
+}
+
+func restoreVMBackupReader(z *zip.Reader, destination string, report backupProgress) error {
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		return fmt.Errorf("restore requires a new data folder; the existing folder was not changed")
+	}
+	manifest, files, err := readVMBackupReader(z)
 	if err != nil {
 		return err
 	}

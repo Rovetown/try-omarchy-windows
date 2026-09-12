@@ -3,8 +3,11 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -75,10 +78,17 @@ func runCloseGuard() {
 			mbYesNo|mbIconQuestion|mbDefbutton2|mbTopmost|mbSetForeground)
 		if r == idYes {
 			logf("close confirmed - graceful guest shutdown")
-			if c := qmpConnect(qmpToolsPort, 8e9); c != nil {
-				c.writeLine(`{"execute":"system_powerdown"}`)
-				c.close()
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			c, err := dialQMPClient(ctx, fmt.Sprintf("127.0.0.1:%d", qmpToolsPort))
+			if err == nil {
+				err = c.Call(ctx, "system_powerdown", nil, nil)
+				c.Close()
 			}
+			cancel()
+			if err != nil {
+				errorBox("Omarchy did not acknowledge the shutdown request. Check its window before retrying.\n\n" + err.Error())
+			}
+
 			// The guest shuts down; the supervisor reaps/exits as usual.
 		}
 		confirmOpen.Store(false)

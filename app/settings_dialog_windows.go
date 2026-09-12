@@ -70,6 +70,7 @@ const (
 	settingsMoveID        = 2028
 	settingsMoveCleanupID = 2029
 	settingsHelpID        = 2030
+	settingsSnapshotsID   = 2031
 	bsAutoradiobutton     = 0x0009
 	wsGroup               = 0x00020000
 	settingsRecoveryDone  = 0x8010
@@ -231,6 +232,8 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				launchRecovery("move")
 			case settingsMoveCleanupID:
 				launchRecovery("move-cleanup")
+			case settingsSnapshotsID:
+				launchRecovery("snapshots")
 			case settingsBackupID:
 				launchRecovery("backup")
 			case settingsRestoreID:
@@ -406,8 +409,8 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		label string
 		id    uintptr
 		x     int32
-	}{{"Back up...", settingsBackupID, left}, {"Restore...", settingsRestoreID, left + 150}, {"Reset guest...", settingsResetID, left + 300}} {
-		button := mk("BUTTON", control.label, control.x, y, 140, 26, wsTabstop, control.id)
+	}{{"Back up...", settingsBackupID, left}, {"Restore...", settingsRestoreID, left + 112}, {"Snapshots...", settingsSnapshotsID, left + 224}, {"Reset guest...", settingsResetID, left + 336}} {
+		button := mk("BUTTON", control.label, control.x, y, 104, 26, wsTabstop, control.id)
 		if portable {
 			procEnableWindow.Call(button, 0)
 		}
