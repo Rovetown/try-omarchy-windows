@@ -47,6 +47,7 @@ jobs:
             mingw-w64-ucrt-x86_64-zstd
 
       - name: Build runtime and corresponding source
+        id: build_runtime
         shell: msys2 {0}
         run: runtime-build/build.sh runtime-output
 
@@ -72,9 +73,12 @@ jobs:
         run: Remove-Item -Recurse -Force runtime-output/smoke
 
       - name: Upload test artifacts
+        if: ${{ !cancelled() && steps.build_runtime.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: winq-emu-alpha10-source-build
-          path: runtime-output/*
+          path: |
+            runtime-output/*.zip
+            runtime-output/SHA256SUMS
           if-no-files-found: error
           retention-days: 14

@@ -256,5 +256,6 @@ python "$recipe/archive.py" "$source_bundle" "$source_zip" --epoch "$source_date
 mkdir -p "$output/smoke"
 cp "$runtime/bin/qemu-system-x86_64.exe" "$output/smoke/"
 cp "$runtime/bin"/*.dll "$output/smoke/"
+cp -R "$runtime/bin/share" "$output/smoke/"
 python "$recipe/verify.py" "$output"
 echo "Built $(du -h "$runtime_zip" | cut -f1) runtime and $(du -h "$source_zip" | cut -f1) source archive"

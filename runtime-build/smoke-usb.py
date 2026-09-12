@@ -15,7 +15,7 @@ def main():
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
-    process = subprocess.Popen([str(args.qemu.resolve()), "-machine", "q35,accel=tcg", "-nodefaults", "-display", "none", "-S", "-m", "128", "-qmp", f"tcp:127.0.0.1:{port},server=on,wait=off"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    process = subprocess.Popen([str(args.qemu.resolve()), "-L", str(args.qemu.resolve().parent / "share"), "-machine", "q35,accel=tcg", "-nodefaults", "-display", "none", "-S", "-m", "128", "-qmp", f"tcp:127.0.0.1:{port},server=on,wait=off"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 20
         connection = None
