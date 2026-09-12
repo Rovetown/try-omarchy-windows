@@ -66,6 +66,9 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 		"-device", "virtio-keyboard-pci", "-device", "virtio-tablet-pci",
 		"-device", "virtio-net-pci,netdev=n0", "-netdev", netdevArg(cfg.forwards),
 		"-device", "virtio-rng-pci",
+		// The q35 root bus cannot hotplug a PCIe controller. USB devices
+		// attach to this controller after the guest has started.
+		"-device", "qemu-xhci,id="+usbControllerID,
 		// The guest must not sleep: a suspended VM leaves the window frozen
 		// with no way back from the keyboard, and Omarchy's power menu
 		// offers suspend whenever the kernel advertises it. With S3 and S4

@@ -66,7 +66,7 @@ func TestUSBExplicitAttachAndRelease(t *testing.T) {
 		t.Fatal(devices, err)
 	}
 	selected := devices[0]
-	fake := &usbFake{inventory: usbSample}
+	fake := &usbFake{objects: []usbQOMEntry{{Name: usbControllerID, Type: "child<qemu-xhci>"}}, inventory: usbSample}
 	broker := usbBroker{fake}
 	if err := broker.Attach(context.Background(), selected); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestUSBRejectsChangedDeviceAndMissingRuntimeSupport(t *testing.T) {
 	devices, _ := parseUSBHostDevices(usbSample)
 	for _, mode := range []string{"missing", "old-runtime", "busy"} {
 		t.Run(mode, func(t *testing.T) {
-			fake := &usbFake{inventory: usbSample, oldRuntime: mode == "old-runtime", failAttach: mode == "busy"}
+			fake := &usbFake{objects: []usbQOMEntry{{Name: usbControllerID, Type: "child<qemu-xhci>"}}, inventory: usbSample, oldRuntime: mode == "old-runtime", failAttach: mode == "busy"}
 			if mode == "missing" {
 				fake.inventory = ""
 			}
@@ -125,11 +125,25 @@ func TestUSBZeroIdentifiersRemainExact(t *testing.T) {
 	if err != nil || len(devices) != 1 {
 		t.Fatal(devices, err)
 	}
-	fake := &usbFake{inventory: "  Bus 1, Addr 3, Port 2, Speed 12 Mb/s\n    Class 00: USB device 0000:0000\n"}
+	fake := &usbFake{objects: []usbQOMEntry{{Name: usbControllerID, Type: "child<qemu-xhci>"}}, inventory: "  Bus 1, Addr 3, Port 2, Speed 12 Mb/s\n    Class 00: USB device 0000:0000\n"}
 	if err := (usbBroker{fake}).Attach(context.Background(), devices[0]); err != nil {
 		t.Fatal(err)
 	}
 	if fake.added["vendorid"] != 0 || fake.added["productid"] != 0 || fake.added["auto-reconnect"] != false {
 		t.Fatal("zero IDs became wildcard selection")
+	}
+}
+
+func TestUSBRequiresControllerCreatedAtLaunch(t *testing.T) {
+	devices, err := parseUSBHostDevices(usbSample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &usbFake{inventory: usbSample}
+	if err := (usbBroker{fake}).Attach(context.Background(), devices[0]); err == nil {
+		t.Fatal("attempted unsupported controller hotplug")
+	}
+	if fake.added != nil {
+		t.Fatal("added a device without a startup controller")
 	}
 }

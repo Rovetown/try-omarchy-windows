@@ -15,7 +15,7 @@ def main():
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
-    process = subprocess.Popen([str(args.qemu.resolve()), "-L", str(args.qemu.resolve().parent / "share"), "-machine", "q35,accel=tcg", "-nodefaults", "-display", "none", "-S", "-m", "128", "-qmp", f"tcp:127.0.0.1:{port},server=on,wait=off"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    process = subprocess.Popen([str(args.qemu.resolve()), "-L", str(args.qemu.resolve().parent / "share"), "-machine", "q35,accel=tcg", "-nodefaults", "-device", "qemu-xhci,id=usb-smoke", "-display", "none", "-S", "-m", "128", "-qmp", f"tcp:127.0.0.1:{port},server=on,wait=off"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 20
         connection = None
@@ -60,7 +60,9 @@ def main():
             properties = call("device-list-properties", {"typename": "usb-host"})
             if "auto-reconnect" not in {p["name"] for p in properties}:
                 raise RuntimeError("runtime lacks verified explicit USB attachment")
-            call("device_add", {"driver": "qemu-xhci", "id": "usb-smoke"})
+            controllers = call("qom-list", {"path": "/machine/peripheral"})
+            if not any(o["name"] == "usb-smoke" and o["type"] == "child<qemu-xhci>" for o in controllers):
+                raise RuntimeError("USB controller was not created at launch")
             # libusb bus numbers are uint8_t, so this cannot select real hardware.
             failure = call("device_add", {"driver": "usb-host", "id": "usb-missing", "bus": "usb-smoke.0", "hostbus": 65535, "hostaddr": 127, "hostport": "127", "vendorid": 65535, "productid": 0, "auto-reconnect": False}, expect_error=True)
             if "failed to find host usb device" not in failure["desc"]:

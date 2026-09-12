@@ -167,9 +167,7 @@ func (b usbBroker) Attach(ctx context.Context, selected usbDevice) error {
 		}
 	}
 	if !controller {
-		if err := b.qmp.Call(ctx, "device_add", map[string]any{"driver": "qemu-xhci", "id": usbControllerID}, nil); err != nil {
-			return err
-		}
+		return fmt.Errorf("restart Omarchy to enable USB device attachment")
 	}
 	arguments := map[string]any{"driver": "usb-host", "id": selected.identity(), "bus": usbControllerID + ".0", "hostbus": selected.Bus, "hostaddr": selected.Address, "hostport": selected.Port, "vendorid": selected.Vendor, "productid": selected.Product, "auto-reconnect": false}
 	if err := b.qmp.Call(ctx, "device_add", arguments, nil); err != nil {

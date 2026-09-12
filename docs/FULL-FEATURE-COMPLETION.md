@@ -252,3 +252,7 @@ real QCOW2 conversion and comparison.
 The interactive Windows snapshot manager also passed create, list, active rollback,
 retained work, recovery shortcuts and close. The UI harness finds dialogs by the
 test process and uses the observed Windows OK control.
+
+The real runtime smoke test caught a q35 limitation: its root PCIe bus cannot
+hotplug a controller. The launcher now creates the USB controller at startup;
+the manager attaches and releases devices on that existing bus.
