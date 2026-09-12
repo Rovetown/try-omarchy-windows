@@ -71,6 +71,11 @@ The workflow uploads a test artifact and does not create or publish a release.
 - Settings rejected a move when NTFS reported only 8.1 GiB available for a
   13.3 GiB copy. The source remained intact and no move journal was committed.
   The dedicated test volume was expanded before retrying.
+- With the fix, Settings moved the full installation from `D:\Omarchy Candidate`
+  to `D:\TryOmarchyCandidate`. Copy verification and activation completed, the
+  source was retained, and the relocated guest reported ready on its next boot.
+  A saved document kept its exact SHA-256, Omarchy reported 4.0.3, and there
+  were no failed user services. Cleanup of the retained source was not exercised.
 - The Windows VM has Hypervisor Platform enabled, but the full Hyper-V feature
   is disabled. This is nested-VM evidence, not physical-hardware acceptance.
 
