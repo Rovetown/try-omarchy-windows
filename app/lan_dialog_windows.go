@@ -19,7 +19,6 @@ type lanDialogState struct {
 
 var lanDialog *lanDialogState
 var lanDialogRegistered bool
-var procLANGetWindowRect = user32.NewProc("GetWindowRect")
 var lanDialogCallback = syscall.NewCallback(lanDialogWindowProc)
 
 func lanDialogWindowProc(hwnd, message, w, l uintptr) uintptr {
@@ -102,7 +101,7 @@ func chooseLANForward(parent uintptr) (lanForwardChoice, error) {
 	rect := [4]int32{0, 0, 430, 230}
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rect[0])), style, 0, 0)
 	var bounds [4]int32
-	procLANGetWindowRect.Call(parent, uintptr(unsafe.Pointer(&bounds[0])))
+	procGetWindowRect.Call(parent, uintptr(unsafe.Pointer(&bounds[0])))
 	state.window, _, err = procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), style|wsVisible, uintptr(bounds[0]+24), uintptr(bounds[1]+32), uintptr(rect[2]-rect[0]), uintptr(rect[3]-rect[1]), parent, 0, instance, 0)
 	if state.window == 0 {
 		return lanForwardChoice{}, err

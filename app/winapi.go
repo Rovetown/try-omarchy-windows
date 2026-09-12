@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"syscall"
 	"time"
 	"unsafe"
@@ -210,14 +211,16 @@ type displayWindowState struct {
 }
 
 var (
-	enumTitlePid        uint32
-	enumTitleIcon       uintptr
-	enumTitleDir        string
-	enumTitleFullscreen bool
-	enumTitleWindows    = map[uintptr]*displayWindowState{}
-	enumTitleSeen       = map[uintptr]bool{}
-	enumTitleCallback   = syscall.NewCallback(enumTitleProc)
-	procGetClassNameW   = user32.NewProc("GetClassNameW")
+	enumTitlePid             uint32
+	enumTitleIcon            uintptr
+	enumTitleDir             string
+	enumTitleFullscreen      bool
+	enumTitleWindows         = map[uintptr]*displayWindowState{}
+	enumTitleSeen            = map[uintptr]bool{}
+	enumTitleMonitors        []screenRect
+	enumTitleTopologyChanged bool
+	enumTitleCallback        = syscall.NewCallback(enumTitleProc)
+	procGetClassNameW        = user32.NewProc("GetClassNameW")
 )
 
 func isQemuDisplayWindow(hwnd uintptr, pid uint32) bool {
@@ -251,7 +254,7 @@ func enumTitleProc(hwnd, _ uintptr) uintptr {
 		state = &displayWindowState{index: index}
 		enumTitleWindows[hwnd] = state
 		if !enumTitleFullscreen {
-			monitors := monitorRects()
+			monitors := enumTitleMonitors
 			placement, err := loadDisplayPlacement(enumTitleDir, index)
 			if err != nil || !placement.usable(monitors) {
 				placement = initialDisplayPlacement(index, monitors)
@@ -261,7 +264,7 @@ func enumTitleProc(hwnd, _ uintptr) uintptr {
 			}
 		}
 		if enumTitleFullscreen {
-			monitors := monitorRects()
+			monitors := enumTitleMonitors
 			if len(monitors) > 0 {
 				m := monitors[index%len(monitors)]
 				procSetWindowPos.Call(hwnd, 0, uintptr(m.Left), uintptr(m.Top), uintptr(m.width()), uintptr(m.height()), 0x0004|0x0010)
@@ -282,6 +285,22 @@ func enumTitleProc(hwnd, _ uintptr) uintptr {
 		value, _ := syscall.UTF16PtrFromString(wanted)
 		procSetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(value)))
 	}
+	if enumTitleTopologyChanged && !enumTitleFullscreen {
+		if now := capturePlacement(hwnd); now != nil && !now.usable(enumTitleMonitors) {
+			if restored := initialDisplayPlacement(state.index, enumTitleMonitors); restored != nil {
+				applyPlacement(hwnd, restored)
+			}
+		}
+	}
+	if enumTitleTopologyChanged && enumTitleFullscreen && len(enumTitleMonitors) > 0 {
+		var bounds screenRect
+		if result, _, _ := procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&bounds))); result != 0 {
+			if current := (&windowPlacement{Normal: bounds}); !current.usable(enumTitleMonitors) {
+				m := enumTitleMonitors[state.index%len(enumTitleMonitors)]
+				procSetWindowPos.Call(hwnd, 0, uintptr(m.Left), uintptr(m.Top), uintptr(m.width()), uintptr(m.height()), 0x0004|0x0010)
+			}
+		}
+	}
 	if !enumTitleFullscreen {
 		if now := capturePlacement(hwnd); now != nil && !now.sameAs(state.last) {
 			now.SavedAt = time.Now()
@@ -296,9 +315,13 @@ func enumTitleProc(hwnd, _ uintptr) uintptr {
 func enforceDisplayWindows(pid uint32, dir string, fullscreen bool, icon uintptr) {
 	if pid != enumTitlePid {
 		enumTitleWindows = map[uintptr]*displayWindowState{}
+		enumTitleMonitors = nil
 	}
 	enumTitlePid, enumTitleDir, enumTitleFullscreen, enumTitleIcon = pid, dir, fullscreen, icon
 	enumTitleSeen = map[uintptr]bool{}
+	monitors := monitorRects()
+	enumTitleTopologyChanged = !slices.Equal(enumTitleMonitors, monitors)
+	enumTitleMonitors = monitors
 	procEnumWindows.Call(enumTitleCallback, 0)
 	foreground, _, _ := procGetForegroundWindow.Call()
 	selected := uintptr(0)

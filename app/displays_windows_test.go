@@ -121,6 +121,22 @@ func TestMultipleNativeDisplayWindowLifecycle(t *testing.T) {
 			t.Fatalf("missing saved placement %d: %v", index, err)
 		}
 	}
+	// Simulate removal of a monitor while a live output is offscreen.
+	procShowWindow.Call(windows[1], swShowNormal)
+	procSetWindowPos.Call(windows[1], 0, 30000, 30000, 800, 600, 0x0004|0x0010)
+	monitors := monitorRects()
+	if capturePlacement(windows[1]).usable(monitors) {
+		t.Fatal("test window did not move offscreen")
+	}
+	enforceDisplayWindows(qemuPid.Load(), dir, false, 0)
+	if capturePlacement(windows[1]).usable(monitors) {
+		t.Fatal("moved a window without a topology change")
+	}
+	enumTitleMonitors = []screenRect{{30000, 30000, 32000, 32000}}
+	enforceDisplayWindows(qemuPid.Load(), dir, false, 0)
+	if !capturePlacement(windows[1]).usable(monitors) {
+		t.Fatal("lost output after monitor removal")
+	}
 	procDestroyWindow.Call(windows[2])
 	windows = windows[:2]
 	enforceDisplayWindows(qemuPid.Load(), dir, false, 0)
