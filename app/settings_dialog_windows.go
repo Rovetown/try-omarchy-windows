@@ -222,7 +222,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				}
 				s, err := collect()
 				diskGiB := storage.DiskGiB
-				if err == nil && !portable {
+				if err == nil {
 					diskGiB, err = parseDiskGiB(text(hDisk))
 				}
 				if err == nil && s.activeShare() != "" {
@@ -236,7 +236,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				if err == nil {
 					err = saveSettings(path, s)
 				}
-				if err == nil && !portable && diskGiB != storage.DiskGiB {
+				if err == nil && diskGiB != storage.DiskGiB {
 					if storageErr := saveStorageSettings(dataDir, diskGiB); storageErr != nil {
 						errorBox("Other settings were saved, but disk capacity could not be saved:\n\n" + storageErr.Error())
 						return 0
@@ -413,21 +413,13 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	y += 34
 	mk("STATIC", "Disk capacity (GiB)", left, y+3, labelW, 20, ssNoprefix, 0)
 	hDisk = mk("EDIT", strconv.Itoa(storage.DiskGiB), fieldX, y, 100, 24, wsBorder|wsTabstop|esAutohscroll, settingsDiskID)
-	if portable {
-		procEnableWindow.Call(hDisk, 0)
-	}
 	y += 28
 	capacityHelp := "0 keeps the default. Increasing grows the disk next launch; lowering never shrinks it. Space is used as files are added."
-	if portable {
-		capacityHelp = "Portable disks keep their existing capacity."
-	}
 	mk("STATIC", capacityHelp, left, y, clientW-2*left, 36, ssNoprefix, 0)
 	y += 38
 	status := ""
-	if !portable {
-		if info, err := os.Stat(filepath.Join(dataDir, "vm", "disk.raw")); err == nil {
-			status = "Current capacity: " + formatGiB(info.Size()) + ". "
-		}
+	if disk, err := inspectInstallationDisk(dataDir); err == nil {
+		status = "Current capacity: " + formatGiB(disk.VirtualBytes) + ". "
 	}
 	if available, err := diskFreeBytes(dataDir); err == nil {
 		status += "Free on Windows drive: " + formatGiB(available) + "."

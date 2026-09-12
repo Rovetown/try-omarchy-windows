@@ -207,3 +207,24 @@ Forwarding now probes the complete TCP/UDP binding set before configuring the
 firewall, releases every probe socket, and identifies QEMU bind errors without
 triggering GPU fallback or runtime rollback. Occupied-port and socket-release
 regressions pass on both operating systems.
+
+### Portable disk expansion
+
+Portable Settings now enables disk capacity and reports the current virtual
+size. Growth works for both standalone and factory-backed QCOW2 disks. It copies
+the active disk into private staging beside the original, expands and checks the
+copy with QEMU, verifies its size and publishes it atomically. The original stays
+locked through validation. Lowering the preference never shrinks an existing
+disk, and interrupted staging is cleaned under the same disk lock.
+
+Linux and native Windows tests verify preserved contents, backing identity,
+zero-filled added capacity, no shrinking, cancellation, insufficient space,
+locked disks, publication failure and interrupted-stage recovery. The native
+portable Settings dialog also passed saving a 64 GiB preference.
+
+The verified current v17 guest also passed the complete smoke facts under the
+Windows QEMU executable using TCG, including the trial account, package set,
+update integration and compatibility version 18. The serial harness now waits
+for provisioning and a confirmed login session before sending checks. A byte
+stream wrapper avoids PowerShell console translation and removes only its own
+Windows QEMU process on timeout; timeout cleanup passed separately.

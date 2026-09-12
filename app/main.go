@@ -139,7 +139,7 @@ func main() {
 	flag.BoolVar(&cfg.fullscreen, "fullscreen", false, "start fullscreen (Immersive)")
 	flag.IntVar(&cfg.memOverrideMiB, "memory", 0, "guest RAM in MiB (default: sized to this PC)")
 	flag.IntVar(&cfg.cpuOverride, "cpus", 0, "guest CPUs (default: sized to this PC)")
-	flag.IntVar(&cfg.diskGiB, "disk-size", 0, "guest disk capacity in GiB (0: default; grows existing standard disks, never shrinks)")
+	flag.IntVar(&cfg.diskGiB, "disk-size", 0, "guest disk capacity in GiB (0: default; grows existing disks, never shrinks)")
 	flag.BoolVar(&cfg.noGpu, "nogpu", false, "force CPU rendering even if WINQ-EMU is installed (same as -render cpu)")
 	renderFlag := flag.String("render", "", "rendering path: auto (default), gpu, or cpu")
 	timeZoneFlag := flag.String("timezone", "", "guest time zone: blank follows Windows, keep leaves the guest alone, or an IANA name such as Europe/Berlin")

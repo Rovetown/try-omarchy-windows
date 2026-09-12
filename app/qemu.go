@@ -284,14 +284,20 @@ func prepareDisk(cfg *config, expandedMiB int64) error {
 // staging file. Its backing path is relative so drive-letter changes do not
 // break it, and an interrupted creation never appears under the final name.
 func preparePortableDisk(cfg *config, expandedBytes int64) error {
-	if _, err := os.Lstat(cfg.disk); err == nil {
-		disk, inspectErr := inspectInstallationDisk(cfg.dir)
-		if inspectErr == nil && disk.Format == "qcow2" && disk.Backing == "" {
-			if disk.VirtualBytes < expandedBytes {
-				return fmt.Errorf("portable disk is smaller than the requested size")
-			}
-			return nil
+	if info, err := os.Lstat(cfg.disk); err == nil {
+		dir := cfg.dir
+		if dir == "" {
+			dir = filepath.Dir(cfg.vmDir)
 		}
+		disk, inspectErr := inspectInstallationDisk(dir)
+		if inspectErr == nil && disk.Format == "qcow2" {
+			return growPortableDisk(dir, disk, expandedBytes)
+		}
+		if inspectErr != nil && info.Size() >= qcow2HeaderSize {
+			return inspectErr
+		}
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 
 	backing := filepath.ToSlash(filepath.Join("..", "guest", "rootfs.ext4"))

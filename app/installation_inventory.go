@@ -90,7 +90,7 @@ func inspectInstallationDisk(dir string) (installationDisk, error) {
 		return result, err
 	}
 	if !matches {
-		return result, fmt.Errorf("portable disk and factory image identities differ")
+		return result, fmt.Errorf("portable disk belongs to a different factory image")
 	}
 	result.BackingSHA256 = digest
 	return result, nil
