@@ -18,6 +18,10 @@ SUCCESS = b"TRYOMARCHY_SMOKE:omarchy:instant-trial"
 # Facts the built image must satisfy, checked from inside the booted guest
 # and reported on the serial console as TRYOMARCHY_FACT:<name>:<value>.
 FACT_CHECKS = {
+    "icon-cache": "sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 && echo yes || echo no",
+    "system-ownership": "test $(stat -c %u:%g /etc) = 0:0 && test $(stat -c %u:%g /usr/lib) = 0:0 && echo yes || echo no",
+    "update-repository": "systemctl is-active try-omarchy-update-repository.service 2>/dev/null || true",
+    "runtime-package": "pacman -Q try-omarchy-runtime | cut -d ' ' -f2",
     "pacman-unlocked": "test ! -e /var/lib/pacman/db.lck && test ! -L /var/lib/pacman/db.lck && echo yes || echo no",
     "omarchy-version": "cat /usr/share/omarchy/version",
     "browser-policy": "test -d /etc/chromium/policies/managed && sudo test -f /etc/sudoers.d/omarchy-theme-browser && echo yes || echo no",
@@ -33,11 +37,15 @@ FACT_CHECKS = {
     "sshd": "systemctl is-active sshd 2>/dev/null || true",
     "omarchy-repo-signed": "grep -A2 '^\\[omarchy\\]' /etc/pacman.conf | grep -q TrustAll && echo no || echo yes",
     "input-group": "id -nG | tr ' ' '\\n' | grep -qx input && echo yes || echo no",
-    "compat-version": "test \"$(cat /usr/share/try-omarchy/compat-version)\" = \"13:$(uname -r)\" && echo yes || echo no",
+    "compat-version": "test \"$(cat /usr/share/try-omarchy/compat-version)\" = \"14:$(uname -r)\" && echo yes || echo no",
     "kernel-modules": "test -f /usr/lib/modules/$(uname -r)/modules.dep.bin && echo yes || echo no",
     "ready-service": "systemctl is-enabled try-omarchy-ready.service 2>/dev/null || true",
 }
 EXPECTED_FACTS = {
+    "icon-cache": "yes",
+    "system-ownership": "yes",
+    "update-repository": "active",
+    "runtime-package": "4.0.3-2",
     "pacman-unlocked": "yes",
     "omarchy-version": "4.0.3",
     "browser-policy": "yes",
