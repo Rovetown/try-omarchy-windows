@@ -52,6 +52,9 @@ func inspectClipboardArchive(data []byte) (*zip.Reader, error) {
 }
 
 func inspectFileArchive(reader io.ReaderAt, archiveBytes int64, maxEntries int, maxBytes uint64) (*zip.Reader, error) {
+	if err := validateTransferZipDirectory(reader, archiveBytes, maxEntries); err != nil {
+		return nil, err
+	}
 	z, err := zip.NewReader(reader, archiveBytes)
 	if err != nil {
 		return nil, err
@@ -64,7 +67,7 @@ func inspectFileArchive(reader io.ReaderAt, archiveBytes int64, maxEntries int, 
 	var size uint64
 	for _, f := range z.File {
 		name := strings.TrimSuffix(f.Name, "/")
-		if !clipboardFileName(f.Name) || (f.Mode().Type() != 0 && !f.FileInfo().IsDir()) || f.Flags&1 != 0 || (f.FileInfo().IsDir() && f.UncompressedSize64 != 0) {
+		if len(f.Extra) > 4096 || len(f.Comment) > 4096 || !clipboardFileName(f.Name) || (f.Mode().Type() != 0 && !f.FileInfo().IsDir()) || f.Flags&1 != 0 || (f.FileInfo().IsDir() && f.UncompressedSize64 != 0) {
 			return nil, fmt.Errorf("unsupported clipboard file name or type")
 		}
 		for prefix := name; prefix != "."; prefix = path.Dir(prefix) {

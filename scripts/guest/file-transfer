@@ -47,7 +47,9 @@ class BudgetFile:
         return getattr(self.file, name)
 
 
+
 def inspect(file):
+    files.validate_directory(file, ENTRIES)
     return files.inspect_archive(zipfile.ZipFile(file), LIMIT, ENTRIES)
 
 

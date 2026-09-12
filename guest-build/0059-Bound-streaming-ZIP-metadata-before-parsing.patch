@@ -1,0 +1,144 @@
+From b51a3f8e8fabba542f4061839d5c83e530e82f93 Mon Sep 17 00:00:00 2001
+From: btsouth <btsouth@users.noreply.github.com>
+Date: Sat, 12 Sep 2026 18:46:25 -0400
+Subject: [PATCH] Validate streaming ZIP metadata before allocating archive
+ entries
+
+---
+ .../usr/local/bin/clipboard-files             | 60 ++++++++++++++++++-
+ .../usr/local/bin/file-transfer               |  2 +
+ guest/tests/test_file_transfer.py             | 33 ++++++++++
+ 3 files changed, 94 insertions(+), 1 deletion(-)
+
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-files b/guest/factory-overlay/usr/local/bin/clipboard-files
+index cfa5df0..e653dcc 100755
+--- a/guest/factory-overlay/usr/local/bin/clipboard-files
++++ b/guest/factory-overlay/usr/local/bin/clipboard-files
+@@ -32,10 +32,68 @@ def valid_name(name):
+     return True
+ 
+ 
++def validate_directory(file, entry_limit=ENTRY_LIMIT):
++    size = file.seek(0, os.SEEK_END)
++    if size < 22:
++        raise ValueError('Invalid transfer archive')
++    file.seek(max(0, size - 65557))
++    tail = file.read(65557)
++    index = tail.rfind(b'PK\x05\x06')
++    if index < 0 or index + 22 > len(tail) or index + 22 + struct.unpack_from('<H', tail, index + 20)[0] != len(tail):
++        raise ValueError('Invalid transfer archive directory')
++    disk, start_disk, disk_count, count, directory_bytes, offset = struct.unpack_from('<HHHHII', tail, index + 4)
++    if disk or start_disk or disk_count != count:
++        raise ValueError('Multi-volume transfers are invalid')
++    end = size - len(tail) + index
++    locator = b''
++    if end >= 20:
++        file.seek(end - 20)
++        locator = file.read(20)
++    has_locator = locator.startswith(b'PK\x06\x07')
++    if (count == 0xffff or directory_bytes == 0xffffffff or offset == 0xffffffff) and not has_locator:
++        raise ValueError('Missing ZIP64 locator')
++    if has_locator:
++        disk, position, disks = struct.unpack_from('<IQI', locator, 4)
++        if disk or disks != 1 or position > end - 76:
++            raise ValueError('Invalid ZIP64 locator')
++        file.seek(position)
++        record = file.read(56)
++        if len(record) != 56 or not record.startswith(b'PK\x06\x06'):
++            raise ValueError('Invalid ZIP64 directory')
++        length = struct.unpack_from('<Q', record, 4)[0]
++        disk, start_disk, disk_count, count64, bytes64, offset64 = struct.unpack_from('<IIQQQQ', record, 16)
++        if not 44 <= length <= 4096 or position + 12 + length != end - 20 or disk or start_disk or disk_count != count64:
++            raise ValueError('Invalid ZIP64 directory')
++        if ((count != 0xffff and count != count64) or (directory_bytes != 0xffffffff and directory_bytes != bytes64)
++                or (offset != 0xffffffff and offset != offset64)):
++            raise ValueError('Inconsistent ZIP64 directory')
++        count, directory_bytes, offset, end = count64, bytes64, offset64, position
++    if not 0 < count <= entry_limit or directory_bytes > 32 << 20 or offset > end or directory_bytes != end - offset:
++        raise ValueError('Transfer archive metadata exceeds its bounds')
++    actual, cursor = 0, offset
++    while cursor < end:
++        if end - cursor < 46 or actual >= count:
++            raise ValueError('Transfer entry count mismatch')
++        file.seek(cursor)
++        header = file.read(46)
++        if len(header) != 46 or not header.startswith(b'PK\x01\x02'):
++            raise ValueError('Invalid transfer entry metadata')
++        name_size, extra_size, comment_size = struct.unpack_from('<HHH', header, 28)
++        length = 46 + name_size + extra_size + comment_size
++        if not 0 < name_size <= 1024 or extra_size > 4096 or comment_size > 4096 or length > end - cursor:
++            raise ValueError('Transfer entry metadata exceeds its bounds')
++        cursor += length
++        actual += 1
++    if actual != count:
++        raise ValueError('Transfer entry count mismatch')
++
++
+ def inspect(data):
+     if not data or len(data) > ARCHIVE_LIMIT:
+         raise ValueError('File clipboard limit is 16 MiB. Use the shared folder for larger selections.')
+-    archive = zipfile.ZipFile(io.BytesIO(data))
++    source = io.BytesIO(data)
++    validate_directory(source)
++    archive = zipfile.ZipFile(source)
+     return inspect_archive(archive)
+ 
+ 
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer b/guest/factory-overlay/usr/local/bin/file-transfer
+index 99a1416..89adbc0 100755
+--- a/guest/factory-overlay/usr/local/bin/file-transfer
++++ b/guest/factory-overlay/usr/local/bin/file-transfer
+@@ -47,7 +47,9 @@ class BudgetFile:
+         return getattr(self.file, name)
+ 
+ 
++
+ def inspect(file):
++    files.validate_directory(file, ENTRIES)
+     return files.inspect_archive(zipfile.ZipFile(file), LIMIT, ENTRIES)
+ 
+ 
+diff --git a/guest/tests/test_file_transfer.py b/guest/tests/test_file_transfer.py
+index cc93c8b..be0bbce 100644
+--- a/guest/tests/test_file_transfer.py
++++ b/guest/tests/test_file_transfer.py
+@@ -81,3 +81,36 @@ class StreamingFileTests(unittest.TestCase):
+             with self.assertRaises(ValueError):
+                 transfer.pack([link], root / 'archive.zip')
+             self.assertFalse((root / 'archive.zip').exists())
++
++    def test_metadata_bounds_and_zip64(self):
++        import struct
++        import zipfile
++        buffer = io.BytesIO()
++        with zipfile.ZipFile(buffer, 'w') as archive:
++            archive.writestr('file', b'contents')
++        original = buffer.getvalue()
++        end = len(original) - 22
++        count, size, offset = struct.unpack_from('<HII', original, end + 10)
++        record = struct.pack('<4sQHHIIQQQQ', b'PK\x06\x06', 44, 45, 45, 0, 0, count, count, size, offset)
++        locator = struct.pack('<4sIQI', b'PK\x06\x07', 0, end, 1)
++        footer = bytearray(original[end:])
++        struct.pack_into('<HHII', footer, 8, 0xffff, 0xffff, 0xffffffff, 0xffffffff)
++        zip64 = original[:end] + record + locator + footer
++        with transfer.inspect(io.BytesIO(zip64)) as archive:
++            self.assertEqual(archive.read('file'), b'contents')
++        for field in ('count', 'size', 'offset', 'zip64-offset', 'zip64-size'):
++            data = bytearray(original)
++            if field == 'count':
++                struct.pack_into('<HH', data, end + 8, 2, 2)
++            elif field == 'size':
++                struct.pack_into('<I', data, end + 12, 1 << 30)
++            elif field == 'offset':
++                struct.pack_into('<I', data, end + 16, 0)
++            elif field == 'zip64-offset':
++                data = bytearray(zip64)
++                struct.pack_into('<Q', data, len(data) - 22 - 20 + 8, 1 << 50)
++            else:
++                data = bytearray(zip64)
++                struct.pack_into('<Q', data, len(data) - 22 - 20 - 56 + 40, 1 << 40)
++            with self.subTest(field=field), self.assertRaises(ValueError):
++                transfer.inspect(io.BytesIO(data))
+-- 
+2.55.0
+
