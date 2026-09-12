@@ -288,7 +288,9 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	rect := [4]int32{0, 0, clientW, clientH}
 	style := uintptr(wsCaption | wsSysmenu | wsVscroll)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rect[0])), style, 0, 0)
-	w, hgt := rect[2]-rect[0], rect[3]-rect[1]
+	// AdjustWindowRectEx excludes the vertical scrollbar from its calculation.
+	scrollbarWidth, _, _ := procGetSystemMetrics.Call(2) // SM_CXVSCROLL
+	w, hgt := rect[2]-rect[0]+int32(scrollbarWidth), rect[3]-rect[1]
 	sx, _, _ := procGetSystemMetrics.Call(smCxscreen)
 	sy, _, _ := procGetSystemMetrics.Call(smCyscreen)
 	work := [4]int32{0, 0, int32(sx), int32(sy)}
@@ -447,7 +449,11 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 			break
 		}
 		if ok, _, _ := procIsDialogMessageW.Call(hwnd, uintptr(unsafe.Pointer(&m))); ok != 0 {
-			scroll.revealFocus()
+			// IsDialogMessage also dispatches scrolling and paint messages.
+			// Only keyboard navigation should bring the focused control back.
+			if m.message == wmKeydown || m.message == wmSyskeydown || m.message == 0x106 {
+				scroll.revealFocus()
+			}
 			continue
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
