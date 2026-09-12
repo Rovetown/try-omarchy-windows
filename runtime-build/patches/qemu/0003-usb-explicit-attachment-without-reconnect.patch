@@ -8,7 +8,7 @@
      bool                             allow_one_guest_reset;
      bool                             allow_all_guest_resets;
      bool                             suppress_remote_wake;
-@@ -1223,16 +1224,35 @@
+@@ -1223,16 +1224,37 @@
          }
      } else
  #endif
@@ -35,8 +35,10 @@
 +            return;
 +        }
 +        if (libusb_get_device_descriptor(ldev, &descriptor) != 0 ||
-+            (s->match.vendor_id && descriptor.idVendor != s->match.vendor_id) ||
-+            (s->match.product_id && descriptor.idProduct != s->match.product_id)) {
++            ((!s->auto_reconnect || s->match.vendor_id) &&
++             descriptor.idVendor != s->match.vendor_id) ||
++            ((!s->auto_reconnect || s->match.product_id) &&
++             descriptor.idProduct != s->match.product_id)) {
 +            libusb_unref_device(ldev);
 +            error_setg(errp, "selected USB device identity changed");
 +            return;
@@ -48,7 +50,7 @@
              return;
          }
          rc = usb_host_open(s, ldev, 0);
-@@ -1759,6 +1779,7 @@
+@@ -1759,6 +1781,7 @@
  };
  
  static const Property usb_host_dev_properties[] = {

@@ -20,7 +20,7 @@
       },
       {
         "file": "patches/qemu/0003-usb-explicit-attachment-without-reconnect.patch",
-        "sha256": "a4ac97168434f53e52a03df772cf67b6211f89f971901f7d5aea5b4bbb227f68"
+        "sha256": "2c838d4b4224dd344f9d036f7ea5b7d216a92cbf45ecefb07f66865698dc347f"
       }
     ]
   },

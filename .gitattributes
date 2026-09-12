@@ -1,1 +1,4 @@
 app/testdata/SHA256SUMS.* text eol=lf
+
+# Runtime patches are digest-pinned and must be byte-identical on Windows.
+runtime-build/patches/**/*.patch text eol=lf
