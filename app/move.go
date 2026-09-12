@@ -322,7 +322,7 @@ func copyMoveFile(source, target string, entry moveFile, disk *os.File, report b
 				return fmt.Errorf("%s grew during the move", entry.Name)
 			}
 			if copied%(32<<20) < int64(n) {
-				free, err := diskFreeBytes(target)
+				free, err := diskFreeBytes(filepath.Dir(target))
 				if err != nil {
 					return err
 				}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,5 +62,27 @@ func TestMoveUninstallRetiresOnlyMatchingRedirects(t *testing.T) {
 	}
 	if state.Redirects[c] != d {
 		t.Fatal("removed another installation's redirect")
+	}
+}
+
+func TestMoveCopiesFilePastSpaceCheckThreshold(t *testing.T) {
+	s, source, destination := moveFixture(t)
+	data := bytes.Repeat([]byte{0x5a}, 33<<20)
+	name := "large-file.bin"
+	if err := os.WriteFile(filepath.Join(source, name), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	prepareFixtureMove(t, s, source, destination)
+	if err := s.recover(func(*installationMove) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{source, destination} {
+		got, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, data) {
+			t.Fatalf("file changed at %s", root)
+		}
 	}
 }
