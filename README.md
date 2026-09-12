@@ -112,6 +112,9 @@ launch. Portable mode continues to support exFAT through the `data` and
 
 ### Settings
 
+The next preview adds [moving an existing installation](docs/MOVING.md) from
+Settings. This is under validation and is not available in v0.0.14-preview.
+
 `settings.json` in the chosen data folder keeps the choices that survive a
 relaunch. Every row has a matching flag, and a flag given on the command line
 wins for that launch:

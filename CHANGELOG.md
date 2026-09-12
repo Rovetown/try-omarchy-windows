@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Added a Settings flow for moving stopped installations, with verified copying
+  and recovery if activation is interrupted.
+- Updated the guest to Omarchy 4.0.3. Existing installations can update through
+  Update > Omarchy while preserving their files and settings.
+- Fixed browser theme permissions, build-account ownership of system files,
+  and icon names that caused package update hooks to fail.
+- Added missing media tools and upstream system defaults.
+- Reduced empty-block scanning during restore and fixed short reads in reclaim.
+- Improved guest package refresh checks and draft PR creation.
+
+Combined candidate validation is in progress. Windows hardware acceptance remains
+required before release.
+
 ## v0.0.14-preview - 2026-09-05
 
 ### Features

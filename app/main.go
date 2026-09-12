@@ -147,7 +147,7 @@ func main() {
 	var forwards forwardList
 	flag.Var(&forwards, "forward", "forward a Windows loopback port into Omarchy, as tcp:2222:22 or 8080:80 (repeatable)")
 	sshPort := flag.Int("ssh", 0, "forward this Windows loopback port to Omarchy's sshd and start sshd for the session")
-	recoveryAction := flag.String("recovery", "", "open backup, restore, reset, or uninstall controls for a stopped standard install")
+	recoveryAction := flag.String("recovery", "", "open backup, restore, reset, move, or uninstall controls for a stopped standard install")
 	uninstall := flag.Bool("uninstall", false, "remove this Try Omarchy installation: shortcuts, the Apps & features entry, and the data folder")
 	uninstallFinish := flag.Bool("uninstall-finish", false, "internal: delete the data folder after the launcher inside it exits")
 	reclaim := flag.Bool("reclaim", false, "ask the running Omarchy to zero its free space so the disk file shrinks after shutdown, then exit")
@@ -179,8 +179,8 @@ func main() {
 		*recoveryAction = "uninstall"
 	}
 	maintenance := *backupPath != "" || *restorePath != "" || *recoveryAction != ""
-	if *recoveryAction != "" && (*recoveryAction != "backup" && *recoveryAction != "restore" && *recoveryAction != "reset" && *recoveryAction != "uninstall" || *backupPath != "" || *restorePath != "") {
-		fatal("Choose one recovery action: backup, restore, or reset.")
+	if *recoveryAction != "" && (*recoveryAction != "backup" && *recoveryAction != "restore" && *recoveryAction != "reset" && *recoveryAction != "uninstall" && *recoveryAction != "move" && *recoveryAction != "move-cleanup" || *backupPath != "" || *restorePath != "") {
+		fatal("Choose one recovery action: backup, restore, reset, move, or uninstall.")
 	}
 	if maintenance && (*backupPath != "" && *restorePath != "" || cfg.portable || cfg.fresh || *openSettings || *diagnostics || *enableWhp || *applyLauncherUpdateFlag || *applyLauncherRollbackFlag) {
 		fatal("Use one recovery action on a stopped standard install, without other maintenance options.")
@@ -217,12 +217,25 @@ func main() {
 		}
 		os.Exit(finishUninstall(cfg.dir, *updateWaitPID))
 	}
+	if *recoveryAction == "move-cleanup" && *updateWaitPID > 0 {
+		waitForProcess(*updateWaitPID)
+	}
 	// Bind before the first-run location prompt. Two quick launches must not
 	// race each other through the folder choice or write the same pointer and
 	// payload files. Settings, diagnostics, and update helpers remain usable
 	// while the VM owns the lifecycle port.
 	if !*openSettings && !*diagnostics && !*applyLauncherUpdateFlag && !*applyLauncherRollbackFlag {
 		runLifecycleListener()
+	}
+	if !cfg.portable {
+		resolved, moveErr := prepareMovedLocation(cfg.dir, !*openSettings && !*diagnostics && !*applyLauncherUpdateFlag && !*applyLauncherRollbackFlag)
+		if moveErr != nil {
+			fatal("Try Omarchy cannot finish resolving an installation move:\n\n%v", moveErr)
+		}
+		if !pathsEqual(resolved, cfg.dir) {
+			cfg.dir = resolved
+			explicitFlags["dir"] = true
+		}
 	}
 	if cfg.portable {
 		self, err := os.Executable()
@@ -827,11 +840,16 @@ func watch(cfg *config, qmp *qmpConn, exited <-chan error) bool {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	procDown := false
+	movedBootPending := false
 	for reason == "" && !procDown {
 		if guestReady.Swap(false) {
 			commitLauncherUpdate(cfg.dir)
 			commitPayloadUpdates(cfg.dir)
 			recordRenderResult(cfg)
+			movedBootPending = true
+		}
+		if movedBootPending && markMovedGuestReady(cfg.dir) {
+			movedBootPending = false
 		}
 		select {
 		case <-exited:

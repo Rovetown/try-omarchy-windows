@@ -1,0 +1,248 @@
+From a01b308b1743f8585eab6fed22497cdc82426ffe Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 08:40:53 -0400
+Subject: [PATCH] Restore lock authentication for new and existing guests
+
+---
+ guest/build.sh                                |  5 ++
+ .../try-omarchy-lock-pam.service              |  1 +
+ .../system/try-omarchy-lock-pam.service       | 13 ++++
+ .../usr/local/lib/try-omarchy/repair-lock-pam | 49 +++++++++++++
+ guest/scripts/finalize-rootfs.sh              |  6 +-
+ guest/spec.json                               |  2 +-
+ guest/tests/test_lock_pam.py                  | 71 +++++++++++++++++++
+ guest/tests/verify.py                         |  2 +-
+ 8 files changed, 146 insertions(+), 3 deletions(-)
+ create mode 120000 guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-lock-pam.service
+ create mode 100644 guest/factory-overlay/etc/systemd/system/try-omarchy-lock-pam.service
+ create mode 100755 guest/factory-overlay/usr/local/lib/try-omarchy/repair-lock-pam
+ create mode 100644 guest/tests/test_lock_pam.py
+
+diff --git a/guest/build.sh b/guest/build.sh
+index 3e325cb..1196d82 100755
+--- a/guest/build.sh
++++ b/guest/build.sh
+@@ -234,6 +234,11 @@ for path in sorted({target["path"] for patch in spec["authenticity"]["backports"
+ QML
+ )
+ "$guest_dir/scripts/configure-rootfs.sh" --root "$root" --spec "$spec"
++# Generate authentication using the pinned upstream installer, before packaging.
++arch-chroot "$root" /usr/bin/omarchy-apply-lock
++install -m 0644 "$root/etc/pam.d/omarchy-lock-password" \
++  "$root/usr/share/try-omarchy/omarchy-lock-password"
++printf '%s\n' etc/pam.d/omarchy-lock-password >>"$root/usr/share/try-omarchy/runtime-config-files"
+ "$guest_dir/scripts/register-omarchy-runtime.sh" \
+   --root "$root" \
+   --work "$work" \
+diff --git a/guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-lock-pam.service b/guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-lock-pam.service
+new file mode 120000
+index 0000000..ecc5c66
+--- /dev/null
++++ b/guest/factory-overlay/etc/systemd/system/multi-user.target.wants/try-omarchy-lock-pam.service
+@@ -0,0 +1 @@
++../try-omarchy-lock-pam.service
+\ No newline at end of file
+diff --git a/guest/factory-overlay/etc/systemd/system/try-omarchy-lock-pam.service b/guest/factory-overlay/etc/systemd/system/try-omarchy-lock-pam.service
+new file mode 100644
+index 0000000..247cdd5
+--- /dev/null
++++ b/guest/factory-overlay/etc/systemd/system/try-omarchy-lock-pam.service
+@@ -0,0 +1,13 @@
++[Unit]
++Description=Restore missing Try Omarchy lock authentication
++Before=display-manager.service
++After=local-fs.target try-omarchy-system-ownership.service
++ConditionPathExists=/usr/share/try-omarchy/omarchy-lock-password
++
++[Service]
++Type=oneshot
++ExecStart=/usr/local/lib/try-omarchy/repair-lock-pam
++RemainAfterExit=yes
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/repair-lock-pam b/guest/factory-overlay/usr/local/lib/try-omarchy/repair-lock-pam
+new file mode 100755
+index 0000000..99ab012
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/repair-lock-pam
+@@ -0,0 +1,49 @@
++#!/usr/bin/python3
++"""Supply the omitted lock PAM profile without replacing local configuration."""
++import os
++from pathlib import Path
++import secrets
++import stat
++
++
++def repair(root, contents):
++    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
++    directory = os.open(root, flags)
++    try:
++        for part in ("etc", "pam.d"):
++            child = os.open(part, flags, dir_fd=directory)
++            os.close(directory)
++            directory = child
++            info = os.fstat(directory)
++            if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o022:
++                raise PermissionError("refusing writable or foreign-owned PAM directory")
++        name = "omarchy-lock-password"
++        try:
++            os.stat(name, dir_fd=directory, follow_symlinks=False)
++            return False
++        except FileNotFoundError:
++            pass
++        temporary = ".try-omarchy-lock-" + secrets.token_hex(16)
++        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
++                     0o600, dir_fd=directory)
++        try:
++            with os.fdopen(fd, "wb") as output:
++                output.write(contents)
++                output.flush()
++                os.fchmod(output.fileno(), 0o644)
++                os.fsync(output.fileno())
++            try:
++                os.link(temporary, name, src_dir_fd=directory, dst_dir_fd=directory,
++                        follow_symlinks=False)
++            except FileExistsError:
++                return False
++            os.fsync(directory)
++            return True
++        finally:
++            os.unlink(temporary, dir_fd=directory)
++    finally:
++        os.close(directory)
++
++
++if __name__ == "__main__":
++    repair("/", Path("/usr/share/try-omarchy/omarchy-lock-password").read_bytes())
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index fd149ef..87e13fe 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -82,6 +82,10 @@ compat_paths=(
+   usr/local/lib/try-omarchy/publish-update-repository
+   etc/systemd/system/try-omarchy-update-repository.service
+   etc/systemd/system/multi-user.target.wants/try-omarchy-update-repository.service
++  usr/share/try-omarchy/omarchy-lock-password
++  usr/local/lib/try-omarchy/repair-lock-pam
++  etc/systemd/system/try-omarchy-lock-pam.service
++  etc/systemd/system/multi-user.target.wants/try-omarchy-lock-pam.service
+   usr/share/try-omarchy/omarchy-theme-browser
+   usr/local/lib/try-omarchy/repair-browser-policy
+   etc/systemd/system/try-omarchy-browser-policy.service
+@@ -122,7 +126,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=14
++compat_revision=15
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/spec.json b/guest/spec.json
+index 9bfd58f..a6163df 100644
+--- a/guest/spec.json
++++ b/guest/spec.json
+@@ -30,7 +30,7 @@
+     "versionFile": "4.0.0.alpha",
+     "channel": "quattro",
+     "license": "MIT",
+-    "packageRelease": 2
++    "packageRelease": 3
+   },
+   "supplyChain": {
+     "omarchyPackagesRepository": "https://github.com/omacom-io/omarchy-pkgs",
+diff --git a/guest/tests/test_lock_pam.py b/guest/tests/test_lock_pam.py
+new file mode 100644
+index 0000000..cd3376c
+--- /dev/null
++++ b/guest/tests/test_lock_pam.py
+@@ -0,0 +1,71 @@
++import importlib.machinery
++import importlib.util
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/lib/try-omarchy/repair-lock-pam'
++loader = importlib.machinery.SourceFileLoader('lock_pam', str(SCRIPT))
++spec = importlib.util.spec_from_loader(loader.name, loader)
++module = importlib.util.module_from_spec(spec)
++loader.exec_module(module)
++
++
++class LockPamTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.root = Path(self.temp.name)
++        self.parent = self.root / 'etc/pam.d'
++        self.parent.mkdir(parents=True)
++        self.target = self.parent / 'omarchy-lock-password'
++
++    def test_missing_profile_installed_completely_and_idempotently(self):
++        contents = b'#%PAM-1.0\nauth required pam_unix.so\n'
++        self.assertTrue(module.repair(self.root, contents))
++        self.assertEqual(self.target.read_bytes(), contents)
++        self.assertEqual(self.target.stat().st_mode & 0o777, 0o644)
++        self.assertFalse(module.repair(self.root, b'replacement'))
++        self.assertEqual(self.target.read_bytes(), contents)
++        self.assertEqual(list(self.parent.iterdir()), [self.target])
++
++    def test_custom_profile_preserved(self):
++        self.target.write_text('custom policy')
++        self.target.chmod(0o600)
++        self.assertFalse(module.repair(self.root, b'replacement'))
++        self.assertEqual(self.target.read_text(), 'custom policy')
++        self.assertEqual(self.target.stat().st_mode & 0o777, 0o600)
++
++    def test_symlink_profile_is_not_followed_or_replaced(self):
++        outside = self.root / 'outside'
++        self.target.symlink_to(outside)
++        self.assertFalse(module.repair(self.root, b'replacement'))
++        self.assertTrue(self.target.is_symlink())
++        self.assertFalse(outside.exists())
++
++    def test_redirected_directory_rejected(self):
++        self.parent.rmdir()
++        outside = self.root / 'outside'
++        outside.mkdir()
++        self.parent.symlink_to(outside)
++        with self.assertRaises(OSError):
++            module.repair(self.root, b'replacement')
++        self.assertEqual(list(outside.iterdir()), [])
++
++    def test_writable_parent_rejected(self):
++        self.parent.chmod(0o777)
++        with self.assertRaises(PermissionError):
++            module.repair(self.root, b'replacement')
++        self.assertFalse(self.target.exists())
++
++    def test_concurrent_profile_creation_preserved(self):
++        link = os.link
++        def competing_writer(*args, **kwargs):
++            self.target.write_text('administrator policy')
++            return link(*args, **kwargs)
++        with patch.object(module.os, 'link', side_effect=competing_writer):
++            self.assertFalse(module.repair(self.root, b'replacement'))
++        self.assertEqual(self.target.read_text(), 'administrator policy')
++        self.assertEqual(list(self.parent.iterdir()), [self.target])
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index cf23a61..8661553 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=14" in finalize_rootfs
++        "compat_revision=15" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+-- 
+2.55.0
+

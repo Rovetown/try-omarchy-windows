@@ -39,8 +39,12 @@ func punchZeroBlocks(f io.ReaderAt, size int64, punch func(offset, length int64)
 		if remaining := size - offset; remaining < int64(n) {
 			n = int(remaining)
 		}
-		if _, err := f.ReadAt(buf[:n], offset); err != nil && err != io.EOF {
+		read, err := f.ReadAt(buf[:n], offset)
+		if err != nil && err != io.EOF {
 			return reclaimed, fmt.Errorf("reading disk at %d: %w", offset, err)
+		}
+		if read != n {
+			return reclaimed, fmt.Errorf("reading disk at %d: %w", offset, io.ErrUnexpectedEOF)
 		}
 		if bytes.Equal(buf[:n], zero[:n]) {
 			if runLength == 0 {

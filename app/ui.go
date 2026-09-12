@@ -123,6 +123,7 @@ type progressUI struct {
 	total         atomic.Int64
 	done          atomic.Bool
 	canceling     atomic.Bool
+	finishOnly    atomic.Bool
 	available     atomic.Bool
 	ready         chan struct{}
 	prompts       chan setupPromptRequest
@@ -198,6 +199,10 @@ func (ui *progressUI) chooseSharedFolder() bool {
 }
 
 func (ui *progressUI) confirmCancel(hCancel uintptr) bool {
+	if ui.finishOnly.Load() {
+		infoBox("Try Omarchy is finishing this operation. Please wait for it to complete.")
+		return false
+	}
 	if ui.canceling.Load() {
 		return true
 	}

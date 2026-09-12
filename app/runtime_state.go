@@ -20,13 +20,28 @@ type runtimeReceipt struct {
 	Executable     verifiedArtifact `json:"executable"`
 }
 
-func runtimeReceiptIdentity(root string) (string, string, bool) {
-	data, err := os.ReadFile(filepath.Join(root, runtimeReceiptFilename))
-	if err != nil || len(data) > maxInstallReceiptBytes {
-		return "", "", false
-	}
+// readRuntimeReceipt shares bounded decoding; callers keep their distinct trust
+// checks for release identity, archive reuse, and executable metadata.
+func readRuntimeReceipt(root string) (runtimeReceipt, bool) {
 	var receipt runtimeReceipt
-	if json.Unmarshal(data, &receipt) != nil || receipt.Schema != 1 ||
+	f, err := os.Open(filepath.Join(root, runtimeReceiptFilename))
+	if err != nil {
+		return receipt, false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxInstallReceiptBytes+1))
+	if err != nil || len(data) > maxInstallReceiptBytes {
+		return receipt, false
+	}
+	if json.Unmarshal(data, &receipt) != nil || receipt.Schema != 1 {
+		return receipt, false
+	}
+	return receipt, true
+}
+
+func runtimeReceiptIdentity(root string) (string, string, bool) {
+	receipt, ok := readRuntimeReceipt(root)
+	if !ok ||
 		receipt.Release == "" || !validSHA256(receipt.ManifestSHA256) {
 		return "", "", false
 	}
@@ -34,12 +49,8 @@ func runtimeReceiptIdentity(root string) (string, string, bool) {
 }
 
 func runtimeReceiptMatches(root, release, manifestSHA, archiveSHA string) bool {
-	data, err := os.ReadFile(filepath.Join(root, runtimeReceiptFilename))
-	if err != nil || len(data) > maxInstallReceiptBytes {
-		return false
-	}
-	var receipt runtimeReceipt
-	if json.Unmarshal(data, &receipt) != nil || receipt.Schema != 1 ||
+	receipt, ok := readRuntimeReceipt(root)
+	if !ok ||
 		!releaseLocationsEquivalent(receipt.Release, release) ||
 		receipt.ManifestSHA256 != normalizedSHA256(manifestSHA) ||
 		receipt.ArchiveSHA256 != normalizedSHA256(archiveSHA) ||
@@ -96,12 +107,8 @@ func writeRuntimeReceipt(root, release, manifestSHA, archiveSHA string) error {
 // same authenticated archive, whatever release it was recorded under. A new
 // release that ships the unchanged archive must not download it again.
 func runtimeArchiveMatches(root, archiveSHA string) bool {
-	data, err := os.ReadFile(filepath.Join(root, runtimeReceiptFilename))
-	if err != nil || len(data) > maxInstallReceiptBytes {
-		return false
-	}
-	var receipt runtimeReceipt
-	if json.Unmarshal(data, &receipt) != nil || receipt.Schema != 1 ||
+	receipt, ok := readRuntimeReceipt(root)
+	if !ok ||
 		!validSHA256(archiveSHA) || receipt.ArchiveSHA256 != normalizedSHA256(archiveSHA) ||
 		!validSHA256(receipt.Executable.SHA256) {
 		return false

@@ -2,8 +2,20 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"testing"
 )
+
+func TestPunchZeroBlocksRejectsShortRead(t *testing.T) {
+	_, err := punchZeroBlocks(bytes.NewReader(make([]byte, 512)), compactBlock, func(int64, int64) error {
+		t.Fatal("punched a block that was not completely read")
+		return nil
+	}, nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("short read: %v", err)
+	}
+}
 
 func TestPunchZeroBlocksCoalescesRunsAndSkipsData(t *testing.T) {
 	// Blocks: data, zero, zero, data, zero(partial tail)

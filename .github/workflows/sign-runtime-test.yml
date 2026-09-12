@@ -3,9 +3,17 @@ name: Sign runtime test launcher
 on:
   workflow_dispatch:
     inputs:
-      release_url:
-        description: Exact GitHub release download base containing the test runtime
+      payload_kind:
+        description: Runtime test or complete candidate payload
         required: true
+        default: runtime
+        type: choice
+        options:
+          - runtime
+          - candidate
+      release_url:
+        description: Exact GitHub release download base for runtime tests; leave blank for candidates
+        required: false
         type: string
       sums_sha256:
         description: Trusted SHA256 of that release's SHA256SUMS
@@ -37,10 +45,11 @@ jobs:
       - name: Validate test pin
         shell: pwsh
         env:
+          PAYLOAD_KIND: ${{ inputs.payload_kind || 'runtime' }}
           TEST_RELEASE_URL: ${{ inputs.release_url }}
           TEST_SUMS_SHA256: ${{ inputs.sums_sha256 }}
         run: |
-          if ($env:TEST_RELEASE_URL -notmatch '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[A-Za-z0-9_.-]+$') {
+          if ($env:PAYLOAD_KIND -eq 'runtime' -and $env:TEST_RELEASE_URL -notmatch '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[A-Za-z0-9_.-]+$') {
             throw 'Test release URL is not an exact GitHub release download base'
           }
           if ($env:TEST_SUMS_SHA256 -notmatch '^[0-9a-f]{64}$') {
@@ -55,10 +64,18 @@ jobs:
         working-directory: app
         shell: pwsh
         env:
+          PAYLOAD_KIND: ${{ inputs.payload_kind || 'runtime' }}
           TEST_RELEASE_URL: ${{ inputs.release_url }}
           TEST_SUMS_SHA256: ${{ inputs.sums_sha256 }}
         run: |
-          go build -trimpath -ldflags "-H windowsgui -s -w -X main.defaultRuntimeReleaseURL=$env:TEST_RELEASE_URL -X main.defaultRuntimeSumsSHA256=$env:TEST_SUMS_SHA256 -X main.defaultDataDirectoryName=TryOmarchyRuntimeTest" -o TryOmarchy-runtime-test.exe .
+          if ($env:PAYLOAD_KIND -eq 'candidate') {
+            $flags = "-H windowsgui -s -w -X main.defaultSumsSHA256=$env:TEST_SUMS_SHA256 -X main.defaultDataDirectoryName=TryOmarchyCandidate"
+          } elseif ($env:PAYLOAD_KIND -eq 'runtime') {
+            $flags = "-H windowsgui -s -w -X main.defaultRuntimeReleaseURL=$env:TEST_RELEASE_URL -X main.defaultRuntimeSumsSHA256=$env:TEST_SUMS_SHA256 -X main.defaultDataDirectoryName=TryOmarchyRuntimeTest"
+          } else {
+            throw 'Unknown test payload kind'
+          }
+          go build -trimpath -ldflags $flags -o TryOmarchy-runtime-test.exe .
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
@@ -88,6 +105,13 @@ jobs:
           }
           $hash = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  TryOmarchy-runtime-test.exe" | Set-Content "$path.sha256" -Encoding ascii
+          @{
+            sourceCommit = '${{ github.sha }}'
+            payloadKind = '${{ inputs.payload_kind || 'runtime' }}'
+            payloadSumsSHA256 = '${{ inputs.sums_sha256 }}'
+            launcherSHA256 = $hash
+            signer = $signature.SignerCertificate.Subject
+          } | ConvertTo-Json | Set-Content app/test-launcher.json -Encoding utf8
 
       - name: Upload signed test launcher
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -96,5 +120,6 @@ jobs:
           path: |
             app/TryOmarchy-runtime-test.exe
             app/TryOmarchy-runtime-test.exe.sha256
+            app/test-launcher.json
           if-no-files-found: error
           retention-days: 7

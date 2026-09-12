@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -37,25 +38,4 @@ jobs:
         if: steps.refresh.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          patch=$(git status --porcelain guest-build | awk '{print $2}' | head -1)
-          branch="guest-lock/$(date -u +%Y-%m-%d)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
-          git add guest-build
-          git commit -m "Refresh the guest package lock"
-          git push origin "$branch"
-          {
-            echo "Arch moved since the guest package lock was written. This adds \`$patch\` so the next prepared guest image builds from the current packages instead of refusing on lock drift."
-            echo
-            echo "Package changes:"
-            echo
-            echo '```'
-            sed -n '/^wrote guest-build/,$p' refresh.log | tail -n +2
-            echo '```'
-            echo
-            echo "The guest contract tests passed with the patch applied. CI does not run automatically on a pull request opened with the workflow token; close and reopen it, or push an empty commit, to trigger the checks before merging."
-          } > body.md
-          gh pr create --title "Refresh the guest package lock" --body-file body.md --head "$branch" --base master
+        run: scripts/release/open-guest-lock-pr.sh

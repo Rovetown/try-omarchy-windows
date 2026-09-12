@@ -1,0 +1,115 @@
+From eb449db25a6a07e983584a8848e3813125947bfe Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 08:51:35 -0400
+Subject: [PATCH] Wait for desktop notifications before marking an upgrade
+ notice delivered
+
+---
+ .../try-omarchy/show-factory-update-notice    | 16 ++++++--
+ guest/scripts/finalize-rootfs.sh              |  2 +-
+ guest/tests/test_overlay_scripts.py           | 41 +++++++++++++++++++
+ guest/tests/verify.py                         |  2 +-
+ 4 files changed, 55 insertions(+), 6 deletions(-)
+
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice b/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice
+index 7231b50..b09ed62 100755
+--- a/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/show-factory-update-notice
+@@ -9,7 +9,15 @@ installed=$(pacman -Q try-omarchy-runtime | cut -d ' ' -f2)
+ [[ $(vercmp "$version" "$installed") -gt 0 ]] || exit 0
+ [[ $(cat "$state" 2>/dev/null || true) != "$version" ]] || exit 0
+ mkdir -p "$(dirname "$state")"
+-notify-send -a "Try Omarchy" -u normal -t 20000 \
+-  "Omarchy update available" \
+-  "Your files and settings were preserved. Open Update > Omarchy to install the desktop update. You do not need to reset this installation."
+-printf '%s\n' "$version" >"$state"
++# The graphical session target can precede the shell's notification bus name.
++# Retry startup failures, and mark the notice shown only after delivery succeeds.
++for attempt in {1..20}; do
++  if timeout 3 notify-send -a "Try Omarchy" -u normal -t 20000 \
++    "Omarchy update available" \
++    "Your files and settings were preserved. Open Update > Omarchy to install the desktop update. You do not need to reset this installation."; then
++    printf '%s\n' "$version" >"$state"
++    exit 0
++  fi
++  if (( attempt < 20 )); then sleep 1; fi
++done
++exit 1
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index 87e13fe..1dda839 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -126,7 +126,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=15
++compat_revision=16
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/tests/test_overlay_scripts.py b/guest/tests/test_overlay_scripts.py
+index 2137d09..91a429e 100644
+--- a/guest/tests/test_overlay_scripts.py
++++ b/guest/tests/test_overlay_scripts.py
+@@ -527,3 +527,44 @@ class CatchUpTests(OverlayCase):
+         self.assertIn("old block", monitors.read_text())
+         self.assertTrue((self.toggles / "window-no-gaps.lua").exists())
+         self.assertFalse((self.toggles / "single-window-aspect-ratio.lua").exists())
++
++
++class FactoryUpdateNoticeTests(OverlayCase):
++    def setUp(self) -> None:
++        super().setUp()
++        self.script = OVERLAY / 'usr/local/lib/try-omarchy/show-factory-update-notice'
++        self.state = self.home / '.local/state/try-omarchy/factory-update-notice-shown'
++        self.fake('systemctl', 'exit 0')
++        self.fake('python3', 'echo 4.0.3-3')
++        self.fake('pacman', 'echo try-omarchy-runtime 4.0.3-2')
++        self.fake('vercmp', 'echo 1')
++        self.fake('sleep', 'exit 0')
++        self.fake('notify-send', f'echo notice >>"{self.log}"')
++
++    def test_waits_for_notification_service_and_marks_only_success(self):
++        self.fake('notify-send', f'''echo notice >>"{self.log}"
++[[ ! -e "{self.state}" ]] || exit 99
++(( $(wc -l <"{self.log}") >= 3 ))''')
++        result = self.run_script(self.script)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(self.log.read_text().splitlines(), ['notice'] * 3)
++        self.assertEqual(self.state.read_text(), '4.0.3-3\n')
++        self.assertEqual(self.run_script(self.script).returncode, 0)
++        self.assertEqual(len(self.log.read_text().splitlines()), 3)
++
++    def test_permanent_failure_is_bounded_and_not_marked_delivered(self):
++        self.fake('notify-send', f'echo notice >>"{self.log}"; exit 1')
++        result = self.run_script(self.script)
++        self.assertNotEqual(result.returncode, 0)
++        self.assertEqual(len(self.log.read_text().splitlines()), 20)
++        self.assertFalse(self.state.exists())
++
++    def test_current_runtime_does_not_notify(self):
++        self.fake('vercmp', 'echo 0')
++        self.assertEqual(self.run_script(self.script).returncode, 0)
++        self.assertFalse(self.log.exists())
++
++    def test_inactive_repository_does_not_notify(self):
++        self.fake('systemctl', 'exit 1')
++        self.assertEqual(self.run_script(self.script).returncode, 0)
++        self.assertFalse(self.log.exists())
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index 8661553..3a48be5 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=15" in finalize_rootfs
++        "compat_revision=16" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+-- 
+2.55.0
+

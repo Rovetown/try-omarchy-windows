@@ -18,6 +18,17 @@ SUCCESS = b"TRYOMARCHY_SMOKE:omarchy:instant-trial"
 # Facts the built image must satisfy, checked from inside the booted guest
 # and reported on the serial console as TRYOMARCHY_FACT:<name>:<value>.
 FACT_CHECKS = {
+    "icon-cache": "sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 && echo yes || echo no",
+    "system-ownership": "test $(stat -c %u:%g /etc) = 0:0 && test $(stat -c %u:%g /usr/lib) = 0:0 && echo yes || echo no",
+    "update-repository": "systemctl is-active try-omarchy-update-repository.service 2>/dev/null || true",
+    "lock-pam": "test $(stat -c %U:%G:%a /etc/pam.d/omarchy-lock-password) = root:root:644 && pacman -Qo /etc/pam.d/omarchy-lock-password >/dev/null && cmp /etc/pam.d/omarchy-lock-password /usr/share/try-omarchy/omarchy-lock-password && echo yes || echo no",
+    "runtime-package": "pacman -Q try-omarchy-runtime | cut -d ' ' -f2",
+    "pacman-unlocked": "test ! -e /var/lib/pacman/db.lck && test ! -L /var/lib/pacman/db.lck && echo yes || echo no",
+    "omarchy-version": "cat /usr/share/omarchy/version",
+    "browser-policy": "test -d /etc/chromium/policies/managed && sudo test -f /etc/sudoers.d/omarchy-theme-browser && echo yes || echo no",
+    "browser-theme-unprivileged": "sudo useradd -r -M -G wheel tryomarchy-policy-check && sudo -u tryomarchy-policy-check sudo -n /usr/bin/omarchy-theme-set-browser-policy 123abc >/dev/null && grep -q 123abc /etc/chromium/policies/managed/color.json && echo yes || echo no; sudo userdel tryomarchy-policy-check >/dev/null 2>&1",
+    "browser-repair": "sudo rm /etc/sudoers.d/omarchy-theme-browser && sudo mv /etc/chromium/policies/managed /etc/chromium/policies/managed.before-test && sudo /usr/local/lib/try-omarchy/repair-browser-policy >/dev/null && sudo cmp /etc/sudoers.d/omarchy-theme-browser /usr/share/try-omarchy/omarchy-theme-browser && test -d /etc/chromium/policies/managed && echo yes || echo no",
+    "media-tools": "command -v pamixer >/dev/null && command -v playerctl >/dev/null && echo yes || echo no",
     "clang": "command -v clang >/dev/null 2>&1 && echo present || echo missing",
     "yay": "pacman -Q yay >/dev/null 2>&1 && echo present || echo missing",
     "omarchy-nvim": "pacman -Q omarchy-nvim >/dev/null 2>&1 && echo present || echo missing",
@@ -27,11 +38,22 @@ FACT_CHECKS = {
     "sshd": "systemctl is-active sshd 2>/dev/null || true",
     "omarchy-repo-signed": "grep -A2 '^\\[omarchy\\]' /etc/pacman.conf | grep -q TrustAll && echo no || echo yes",
     "input-group": "id -nG | tr ' ' '\\n' | grep -qx input && echo yes || echo no",
-    "compat-version": "test \"$(cat /usr/share/try-omarchy/compat-version)\" = \"12:$(uname -r)\" && echo yes || echo no",
+    "compat-version": "test \"$(cat /usr/share/try-omarchy/compat-version)\" = \"16:$(uname -r)\" && echo yes || echo no",
     "kernel-modules": "test -f /usr/lib/modules/$(uname -r)/modules.dep.bin && echo yes || echo no",
     "ready-service": "systemctl is-enabled try-omarchy-ready.service 2>/dev/null || true",
 }
 EXPECTED_FACTS = {
+    "icon-cache": "yes",
+    "system-ownership": "yes",
+    "update-repository": "active",
+    "runtime-package": "4.0.3-3",
+    "lock-pam": "yes",
+    "pacman-unlocked": "yes",
+    "omarchy-version": "4.0.3",
+    "browser-policy": "yes",
+    "media-tools": "yes",
+    "browser-repair": "yes",
+    "browser-theme-unprivileged": "yes",
     "clang": "present",
     "yay": "present",
     "omarchy-nvim": "present",
@@ -68,7 +90,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("artifacts", type=Path)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--package-update", action="store_true", help="also exercise pacman against current signed repositories in the disposable snapshot")
     args = parser.parse_args()
+    if args.package_update:
+        FACT_CHECKS["package-update"] = "sudo pacman -Syu --noconfirm >/tmp/tryomarchy-package-update.log 2>&1 && echo yes || { cat /tmp/tryomarchy-package-update.log >&2; echo no; }"
+        EXPECTED_FACTS["package-update"] = "yes"
 
     if not Path("/dev/kvm").exists() or not os.access("/dev/kvm", os.R_OK | os.W_OK):
         raise SystemExit("release smoke test requires accessible /dev/kvm")
