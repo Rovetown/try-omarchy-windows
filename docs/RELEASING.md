@@ -42,7 +42,9 @@ artifact for verification. Use it after changing the OIDC or signing configurati
    artifact, and creates a draft release.
 4. Download the draft `SHA256SUMS`, add it under `app/testdata`, and update
    `defaultReleaseURL`, `defaultSumsSHA256`, and the embedded fixture name in
-   `app/manifest.go`. Update `currentVersion` in `app/update.go` to the same tag.
+   `app/manifest.go`. Update `currentVersion` in `app/update.go` and the numeric and text versions
+   in `app/versioninfo.rc` to the same tag. Regenerate
+   `app/rsrc_windows_amd64.syso` using the commands in `versioninfo.rc`.
 5. Run `scripts/release/validate-pin.py TAG`, commit, and push the pin.
 
 ## Test the draft on physical Windows
