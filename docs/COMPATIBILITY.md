@@ -22,8 +22,9 @@ Try Omarchy runs the full x86_64 Arch Linux environment used by Omarchy. It is n
 - Networking uses QEMU NAT. Services inside the guest are not exposed to the Windows network automatically.
 - Host-folder sharing is not available with an external stock QEMU fallback.
 - Text and image clipboard sharing work in both directions (images travel as
-  PNG, up to 16 MiB). File clipboard and drag and drop are not implemented
-  yet; use the shared folder for files.
+  PNG, up to 16 MiB). The published preview uses shared folders for files.
+  The [v0.0.17 candidate](COMPLETION-CANDIDATE.md) adds file and folder clipboard
+  transfer with bounded size and cache storage. Drag-and-drop remains unsupported.
 - The launcher boots its pinned kernel and initramfs from the release image, and the guest's pacman configuration holds the `linux` package so `pacman -Syu` and `omarchy-update` leave it alone. Kernel updates arrive with guest-image updates, which also carry the matching modules onto existing disks. Forcing a different kernel package into the guest leaves it out of sync with those boot files.
 - Configuration export and restore are available through `try-omarchy-export`; see [the migration guide](MIGRATION.md). Development builds also support [stopped-VM backup and restore](BACKUP.md) from Settings or command-line options. Reset can retain the old disk and offer a full backup first. Snapshots are not available yet.
 

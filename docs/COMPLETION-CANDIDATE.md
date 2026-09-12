@@ -1,6 +1,8 @@
-# Completion candidate after v0.0.16
+# v0.0.17-preview completion candidate
 
-This development candidate extends the signed v16 baseline. It is not included
+PR #106 merged the implementation at
+`8a99aa4d214c6b5edc8efa3008df8d5a7aef67af`. This candidate extends the signed
+v16 baseline. It is not included
 in the existing v16 draft executable or image. Guest compatibility revision 18
 is required for file clipboard transfer and the safer reclaim agent.
 

@@ -5,8 +5,10 @@ still needs the checks below; the open work is tracked in one place, GitHub
 issue #77. A passing build does not establish hardware or
 upgrade reliability.
 
-The [v0.0.16 candidate report](PREVIEW-16-VALIDATION.md) records the current
-signed draft and Windows VM checks. The [revision 17 report](MIGRATION-17-VALIDATION.md)
+The [completion candidate](COMPLETION-CANDIDATE.md) records the v0.0.17
+implementation and planned combined Windows acceptance round. The
+[v0.0.16 candidate report](PREVIEW-16-VALIDATION.md) records earlier signed
+draft and Windows VM checks. The [revision 17 report](MIGRATION-17-VALIDATION.md)
 records additional migration and disk growth tests. Physical acceptance remains open.
 
 ## Current guest completion work
@@ -82,6 +84,9 @@ v1 should provide a dependable way to try Omarchy, keep a trial setup, and take
 its configuration to a full installation. Prioritize reliability, storage,
 recovery, and understandable controls.
 
-Image clipboard shipped in v0.0.13-preview. Better file transfers, camera
-bridging, Windows ARM64, and additional portable launchers remain later work.
+Image clipboard shipped in v0.0.13-preview. File and folder clipboard, reclaim
+controls, and scrolling Settings are implemented for v0.0.17-preview; their
+combined Windows acceptance remains open. Drag-and-drop, multiple guest
+monitors, camera bridging, Windows ARM64, and additional portable launchers
+remain separate work.
 Booting an existing physical installation is outside the v1 scope.
