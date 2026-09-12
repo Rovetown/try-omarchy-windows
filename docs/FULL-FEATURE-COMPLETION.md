@@ -341,3 +341,10 @@ stalled connections and releases the disk queue. Completed destinations survive
 cancellation and service shutdown. Five service tests pass on Linux with the
 race detector and on Windows, including a deliberately stalled HTTP upload.
 The listener bounds request headers and connection lifetimes.
+
+Guest patch 0060 adds HTTP upload/download clients with strict ticket validation,
+bounded metadata and no redirect following. Upload retries check completion
+first, including after a lost response. A guest-client round trip through the
+Go service passes with Unicode names and a repeated completed upload. The fresh
+patched guest contract passes 97 tests. Clipboard and drag adapters still need
+to distribute these tickets and present destination/progress controls.

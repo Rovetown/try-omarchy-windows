@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -239,5 +242,76 @@ func TestFileTransferServiceCloseStopsListener(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("listener survived service close")
+	}
+}
+
+func TestFileTransferServiceGuestClientRoundTrip(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("guest helper requires Linux")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python unavailable")
+	}
+	source := filepath.Join(t.TempDir(), "document Ω.txt")
+	original := []byte(strings.Repeat("cross platform bytes\n", 10000))
+	if err := os.WriteFile(source, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := newFileTransferService(t.TempDir(), transferTestLimits())
+	defer service.Close()
+	ticket, err := service.Offer(context.Background(), []string{source}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(service)
+	defer server.Close()
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := filepath.Join(t.TempDir(), "ticket.json")
+	saveTicket := func(value fileTransferTicket) {
+		t.Helper()
+		data, _ := json.Marshal(value)
+		if err := os.WriteFile(metadata, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) []byte {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		command := exec.CommandContext(ctx, python, append([]string{filepath.Join("..", "scripts", "guest", "file-transfer")}, args...)...)
+		data, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("guest helper: %v: %s", err, data)
+		}
+		return data
+	}
+	saveTicket(ticket)
+	guestDestination := filepath.Join(t.TempDir(), "Guest received")
+	run("download", "--ticket", metadata, "--host", host, "--port", port, "--destination", guestDestination)
+	guestFile := filepath.Join(guestDestination, filepath.Base(source))
+	if data, err := os.ReadFile(guestFile); err != nil || !bytes.Equal(data, original) {
+		t.Fatal("guest download changed content", err)
+	}
+	archive := filepath.Join(t.TempDir(), "guest.zip")
+	data := run("pack", "--archive", archive, guestFile)
+	var offer fileTransferOffer
+	if err := json.Unmarshal(data, &offer); err != nil {
+		t.Fatal(err)
+	}
+	hostDestination := filepath.Join(t.TempDir(), "Host received")
+	incoming, err := service.AcceptReceive(offer, hostDestination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveTicket(incoming)
+	for i := 0; i < 2; i++ {
+		run("upload", "--ticket", metadata, "--host", host, "--port", port, "--archive", archive)
+	}
+	if data, err := os.ReadFile(filepath.Join(hostDestination, filepath.Base(source))); err != nil || !bytes.Equal(data, original) {
+		t.Fatal("guest upload changed content", err)
 	}
 }
