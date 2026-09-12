@@ -241,18 +241,22 @@ func TestCheckpointRollbackRejectsCorruptionAndBusyDisk(t *testing.T) {
 				t.Fatal(err)
 			}
 			disk := filepath.Join(s.installation, "vm", "disk.raw")
-			before, _ := os.ReadFile(disk)
+			before, err := os.ReadFile(disk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var diskLock *os.File
 			switch mode {
 			case "corrupt":
 				if err := os.WriteFile(filepath.Join(s.path(), entry.ID, "vm.zip"), []byte("broken"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "busy":
-				lock, err := openBackupDisk(disk)
+				diskLock, err = openBackupDisk(disk)
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer lock.Close()
+				defer diskLock.Close()
 			case "pending-update":
 				if err := os.WriteFile(filepath.Join(s.installation, updateStateFilename), []byte("pending"), 0600); err != nil {
 					t.Fatal(err)
@@ -265,7 +269,15 @@ func TestCheckpointRollbackRejectsCorruptionAndBusyDisk(t *testing.T) {
 			if _, err := s.Rollback(entry.ID, nil); err == nil {
 				t.Fatal("accepted unsafe rollback")
 			}
-			got, _ := os.ReadFile(disk)
+			if diskLock != nil {
+				if err := diskLock.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := os.ReadFile(disk)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(got, before) {
 				t.Fatal("changed active disk")
 			}
