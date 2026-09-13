@@ -39,6 +39,7 @@ const (
 	trayCommandHelp           = 3008
 	trayCommandClipboardFiles = 3009
 	trayCommandDevices        = 3010
+	trayCommandTransfers      = 3011
 
 	nimAdd                = 0
 	nimDelete             = 2
@@ -216,6 +217,7 @@ func runTray(cfg trayLaunchConfig, ready chan<- uintptr, done chan<- struct{}) {
 		appendItem(mfSeparator, 0, "")
 		appendItem(mfString, trayCommandSettings, "Settings...")
 		appendItem(mfString, trayCommandDevices, "USB devices...")
+		appendItem(mfString, trayCommandTransfers, "File transfers…")
 		appendItem(mfString, trayCommandDiagnose, "Create diagnostics...")
 		reclaimFlags := uintptr(mfString)
 		if !reclaimSupported.Load() {
@@ -242,6 +244,8 @@ func runTray(cfg trayLaunchConfig, ready chan<- uintptr, done chan<- struct{}) {
 			}
 		case trayCommandShare:
 			openSharedFolder()
+		case trayCommandTransfers:
+			go showFileDropWindow(nil)
 		case trayCommandDevices:
 			launchControl("-devices", &devicesOpen)
 		case trayCommandSettings:

@@ -924,6 +924,11 @@ func watch(cfg *config, qmp *qmpConn, exited <-chan error) bool {
 				break
 			}
 			silent = 0
+			if paths, ok := droppedFilesEvent(line); ok {
+				if err := sendDroppedFiles(paths); err != nil {
+					logf("file drop: %v", err)
+				}
+			}
 			if r := shutdownReason(line); r != "" {
 				reason = r
 			}

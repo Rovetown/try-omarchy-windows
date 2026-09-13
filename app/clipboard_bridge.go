@@ -40,6 +40,8 @@ type clipBridge struct {
 	transferError    func(error)
 	getPaths         func() ([]string, bool)
 	setPaths         func([]string) bool
+	setDropPaths     func([]string) bool
+	dropRequests     chan []string
 }
 
 func (b *clipBridge) acceptPush(l net.Listener) {
@@ -65,7 +67,7 @@ func (b *clipBridge) acceptPush(l net.Listener) {
 			if err != nil || !strings.HasSuffix(line, "\n") {
 				return
 			}
-			if strings.HasPrefix(line, "files-offer:") && b.transfers != nil {
+			if (strings.HasPrefix(line, "files-offer:") || strings.HasPrefix(line, "drop-offer:")) && b.transfers != nil {
 				b.receiveClipboardTransfer(c, line)
 				return
 			}

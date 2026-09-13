@@ -18,7 +18,7 @@ mkdir -p "$STATE"
 # wl-paste supplies the selected text on stdin. Keeping it in a file preserves
 # trailing newlines and avoids a second clipboard read after the selection moves.
 case "${1:-}" in
---push|--receive|--push-image|--receive-image|--push-files|--receive-files|--receive-transfer)
+--push|--receive|--push-image|--receive-image|--push-files|--receive-files|--receive-transfer|--receive-drop)
   # URI selections belong to the file watcher, never the text bridge.
   if [ "$1" = --push ] && wl-paste --list-types 2>/dev/null | grep -Eq '^(text/uri-list|x-special/gnome-copied-files)$'; then exit 0; fi
   kind=text
@@ -36,6 +36,10 @@ case "${1:-}" in
   # overwrite the state of a newer host value received while it was sending.
   exec 9> "$STATE/lock"
   flock -x 9 || exit 1
+  if [ "$1" = --receive-drop ]; then
+    file-transfer drop-receive --state "$STATE" < "$outgoing" || exit 1
+    exit 0
+  fi
   if [ "$1" = --receive-transfer ]; then
     file-transfer clipboard-receive --state "$STATE" < "$outgoing" || exit 1
     exit 0
@@ -148,6 +152,7 @@ while :; do
         png:*) receive=--receive-image; line=${line#png:} ;;
         files:*) receive=--receive-files; line=${line#files:} ;;
         transfer:*) receive=--receive-transfer; line=${line#transfer:} ;;
+        drop:*) receive=--receive-drop; line=${line#drop:} ;;
         esac
         printf '%s' "$line" | base64 -d > "$STATE/incoming" 2>/dev/null || continue
         "$0" $receive < "$STATE/incoming" || break

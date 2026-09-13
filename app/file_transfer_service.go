@@ -236,6 +236,13 @@ func (s *fileTransferService) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
+	if r.Method == "DELETE" {
+		s.release(job)
+		delete(s.jobs, job.ticket.Token)
+		s.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if parts[0] == "download" {
 		file := job.file
 		offer := job.ticket.Offer

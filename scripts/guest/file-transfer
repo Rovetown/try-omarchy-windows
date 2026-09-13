@@ -219,6 +219,22 @@ def download(ticket, destination, host='10.0.2.2', port=4452):
         if response.status != 200 or response.getheader('Content-Length') != str(ticket['offer']['archiveBytes']):
             raise ValueError('Download is unavailable or changed')
         return receive(response, ticket['offer'], destination)
+    except BaseException:
+        connection.close()
+        cancel_ticket(ticket, host, port)
+        raise
+    finally:
+        connection.close()
+
+
+def cancel_ticket(ticket, host='10.0.2.2', port=4452):
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    try:
+        connection.request('DELETE', '/' + ticket['direction'] + '/' + ticket['token'])
+        response = connection.getresponse()
+        response.read(4096)
+    except (OSError, http.client.HTTPException):
+        pass
     finally:
         connection.close()
 
@@ -309,18 +325,18 @@ def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
     return result
 
 
-def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448):
+def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448, purpose='clipboard'):
     paths = files.uri_paths(data, ENTRIES)
     key = clipboard_selection_key(paths)
     marker = state / 'last_file_selection'
-    if marker.exists() and marker.read_text() == key:
+    if purpose == 'clipboard' and marker.exists() and marker.read_text() == key:
         return {'state': 'unchanged'}
     with tempfile.TemporaryDirectory(prefix='transfer-', dir=state) as temporary:
         archive = Path(temporary) / 'selection.zip'
         offer = pack(paths, archive)
         with socket.create_connection((host, push_port), timeout=10) as control:
             control.settimeout(7200)
-            control.sendall(b'files-offer:' + base64.b64encode(json.dumps(offer).encode()) + b'\n')
+            control.sendall((b'drop-offer:' if purpose == 'drop' else b'files-offer:') + base64.b64encode(json.dumps(offer).encode()) + b'\n')
             stream = control.makefile('rb')
             with stream:
                 line = stream.readline(4097)
@@ -335,7 +351,8 @@ def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448):
                 control.sendall(b'complete\n')
                 if stream.readline(64) != b'complete\n':
                     raise ValueError('Clipboard changed before file delivery; copy again')
-    marker.write_text(key)
+    if purpose == 'clipboard':
+        marker.write_text(key)
     return {'state': 'completed'}
 
 
@@ -369,21 +386,35 @@ def main():
         client.add_argument('--host', default='10.0.2.2')
         client.add_argument('--port', default=4452, type=int)
         client.add_argument('--destination' if name == 'download' else '--archive', required=True, type=Path)
-    for name in ('clipboard-send', 'clipboard-receive', 'clipboard-pull', 'clipboard-mark'):
+    for name in ('clipboard-send', 'clipboard-receive', 'clipboard-pull', 'clipboard-mark', 'drop-send', 'drop-receive'):
         client = sub.add_parser(name)
         client.add_argument('--state', type=Path)
     args = parser.parse_args()
     if args.command == 'clipboard-pull':
         clipboard_pull()
         return
-    if args.command in ('clipboard-send', 'clipboard-receive', 'clipboard-mark'):
+    if args.command in ('clipboard-send', 'clipboard-receive', 'clipboard-mark', 'drop-send', 'drop-receive'):
         if args.state is None:
             raise ValueError('Clipboard state directory is required')
         plain_path(args.state)
         data = sys.stdin.buffer.read((1 << 20) + 1)
         if len(data) > 1 << 20:
             raise ValueError('Clipboard selection exceeds its limit')
-        if args.command == 'clipboard-mark':
+        if args.command == 'drop-receive':
+            ticket = json.loads(data)
+            if not valid_ticket(ticket, 'download'):
+                raise ValueError('Invalid dropped-file ticket')
+            fd, name = tempfile.mkstemp(prefix='incoming-drop-', dir=args.state)
+            with os.fdopen(fd, 'wb') as output:
+                output.write(data)
+            try:
+                subprocess.Popen(['file-transfer-window', '--ticket', name], close_fds=True, start_new_session=True)
+            except BaseException:
+                Path(name).unlink(missing_ok=True)
+                raise
+        elif args.command == 'drop-send':
+            clipboard_send(data, args.state, purpose='drop')
+        elif args.command == 'clipboard-mark':
             (args.state / 'last_file_selection').write_text(clipboard_selection_key(files.uri_paths(data, ENTRIES)))
         elif args.command == 'clipboard-send':
             clipboard_send(data, args.state)

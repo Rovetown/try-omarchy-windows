@@ -1,0 +1,472 @@
+From 3f18465b261fb3575f22ed4c520009312a0d27ef Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 20:49:55 -0400
+Subject: [PATCH] Add native file drop transfer windows on the guest
+
+---
+ .../usr/local/bin/clipboard-bridge            |   7 +-
+ .../usr/local/bin/file-transfer               |  45 ++++-
+ .../usr/local/bin/file-transfer-window        | 174 ++++++++++++++++++
+ .../try-omarchy-file-transfers.desktop        |   8 +
+ guest/packages.lock.json                      |   2 +-
+ guest/packages.txt                            |   2 +
+ guest/scripts/finalize-rootfs.sh              |   2 +
+ guest/tests/test_file_transfer.py             |  14 ++
+ guest/tests/test_file_transfer_window.py      |  52 ++++++
+ 9 files changed, 297 insertions(+), 9 deletions(-)
+ create mode 100755 guest/factory-overlay/usr/local/bin/file-transfer-window
+ create mode 100644 guest/factory-overlay/usr/share/applications/try-omarchy-file-transfers.desktop
+ create mode 100644 guest/tests/test_file_transfer_window.py
+
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-bridge b/guest/factory-overlay/usr/local/bin/clipboard-bridge
+index 3a8600d..8db5ec7 100755
+--- a/guest/factory-overlay/usr/local/bin/clipboard-bridge
++++ b/guest/factory-overlay/usr/local/bin/clipboard-bridge
+@@ -18,7 +18,7 @@ mkdir -p "$STATE"
+ # wl-paste supplies the selected text on stdin. Keeping it in a file preserves
+ # trailing newlines and avoids a second clipboard read after the selection moves.
+ case "${1:-}" in
+---push|--receive|--push-image|--receive-image|--push-files|--receive-files|--receive-transfer)
++--push|--receive|--push-image|--receive-image|--push-files|--receive-files|--receive-transfer|--receive-drop)
+   # URI selections belong to the file watcher, never the text bridge.
+   if [ "$1" = --push ] && wl-paste --list-types 2>/dev/null | grep -Eq '^(text/uri-list|x-special/gnome-copied-files)$'; then exit 0; fi
+   kind=text
+@@ -36,6 +36,10 @@ case "${1:-}" in
+   # overwrite the state of a newer host value received while it was sending.
+   exec 9> "$STATE/lock"
+   flock -x 9 || exit 1
++  if [ "$1" = --receive-drop ]; then
++    file-transfer drop-receive --state "$STATE" < "$outgoing" || exit 1
++    exit 0
++  fi
+   if [ "$1" = --receive-transfer ]; then
+     file-transfer clipboard-receive --state "$STATE" < "$outgoing" || exit 1
+     exit 0
+@@ -148,6 +152,7 @@ while :; do
+         png:*) receive=--receive-image; line=${line#png:} ;;
+         files:*) receive=--receive-files; line=${line#files:} ;;
+         transfer:*) receive=--receive-transfer; line=${line#transfer:} ;;
++        drop:*) receive=--receive-drop; line=${line#drop:} ;;
+         esac
+         printf '%s' "$line" | base64 -d > "$STATE/incoming" 2>/dev/null || continue
+         "$0" $receive < "$STATE/incoming" || break
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer b/guest/factory-overlay/usr/local/bin/file-transfer
+index eb9dcd3..dff959b 100755
+--- a/guest/factory-overlay/usr/local/bin/file-transfer
++++ b/guest/factory-overlay/usr/local/bin/file-transfer
+@@ -219,6 +219,22 @@ def download(ticket, destination, host='10.0.2.2', port=4452):
+         if response.status != 200 or response.getheader('Content-Length') != str(ticket['offer']['archiveBytes']):
+             raise ValueError('Download is unavailable or changed')
+         return receive(response, ticket['offer'], destination)
++    except BaseException:
++        connection.close()
++        cancel_ticket(ticket, host, port)
++        raise
++    finally:
++        connection.close()
++
++
++def cancel_ticket(ticket, host='10.0.2.2', port=4452):
++    connection = http.client.HTTPConnection(host, port, timeout=5)
++    try:
++        connection.request('DELETE', '/' + ticket['direction'] + '/' + ticket['token'])
++        response = connection.getresponse()
++        response.read(4096)
++    except (OSError, http.client.HTTPException):
++        pass
+     finally:
+         connection.close()
+ 
+@@ -309,18 +325,18 @@ def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
+     return result
+ 
+ 
+-def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448):
++def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448, purpose='clipboard'):
+     paths = files.uri_paths(data, ENTRIES)
+     key = clipboard_selection_key(paths)
+     marker = state / 'last_file_selection'
+-    if marker.exists() and marker.read_text() == key:
++    if purpose == 'clipboard' and marker.exists() and marker.read_text() == key:
+         return {'state': 'unchanged'}
+     with tempfile.TemporaryDirectory(prefix='transfer-', dir=state) as temporary:
+         archive = Path(temporary) / 'selection.zip'
+         offer = pack(paths, archive)
+         with socket.create_connection((host, push_port), timeout=10) as control:
+             control.settimeout(7200)
+-            control.sendall(b'files-offer:' + base64.b64encode(json.dumps(offer).encode()) + b'\n')
++            control.sendall((b'drop-offer:' if purpose == 'drop' else b'files-offer:') + base64.b64encode(json.dumps(offer).encode()) + b'\n')
+             stream = control.makefile('rb')
+             with stream:
+                 line = stream.readline(4097)
+@@ -335,7 +351,8 @@ def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448):
+                 control.sendall(b'complete\n')
+                 if stream.readline(64) != b'complete\n':
+                     raise ValueError('Clipboard changed before file delivery; copy again')
+-    marker.write_text(key)
++    if purpose == 'clipboard':
++        marker.write_text(key)
+     return {'state': 'completed'}
+ 
+ 
+@@ -369,21 +386,35 @@ def main():
+         client.add_argument('--host', default='10.0.2.2')
+         client.add_argument('--port', default=4452, type=int)
+         client.add_argument('--destination' if name == 'download' else '--archive', required=True, type=Path)
+-    for name in ('clipboard-send', 'clipboard-receive', 'clipboard-pull', 'clipboard-mark'):
++    for name in ('clipboard-send', 'clipboard-receive', 'clipboard-pull', 'clipboard-mark', 'drop-send', 'drop-receive'):
+         client = sub.add_parser(name)
+         client.add_argument('--state', type=Path)
+     args = parser.parse_args()
+     if args.command == 'clipboard-pull':
+         clipboard_pull()
+         return
+-    if args.command in ('clipboard-send', 'clipboard-receive', 'clipboard-mark'):
++    if args.command in ('clipboard-send', 'clipboard-receive', 'clipboard-mark', 'drop-send', 'drop-receive'):
+         if args.state is None:
+             raise ValueError('Clipboard state directory is required')
+         plain_path(args.state)
+         data = sys.stdin.buffer.read((1 << 20) + 1)
+         if len(data) > 1 << 20:
+             raise ValueError('Clipboard selection exceeds its limit')
+-        if args.command == 'clipboard-mark':
++        if args.command == 'drop-receive':
++            ticket = json.loads(data)
++            if not valid_ticket(ticket, 'download'):
++                raise ValueError('Invalid dropped-file ticket')
++            fd, name = tempfile.mkstemp(prefix='incoming-drop-', dir=args.state)
++            with os.fdopen(fd, 'wb') as output:
++                output.write(data)
++            try:
++                subprocess.Popen(['file-transfer-window', '--ticket', name], close_fds=True, start_new_session=True)
++            except BaseException:
++                Path(name).unlink(missing_ok=True)
++                raise
++        elif args.command == 'drop-send':
++            clipboard_send(data, args.state, purpose='drop')
++        elif args.command == 'clipboard-mark':
+             (args.state / 'last_file_selection').write_text(clipboard_selection_key(files.uri_paths(data, ENTRIES)))
+         elif args.command == 'clipboard-send':
+             clipboard_send(data, args.state)
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer-window b/guest/factory-overlay/usr/local/bin/file-transfer-window
+new file mode 100755
+index 0000000..4af1016
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/bin/file-transfer-window
+@@ -0,0 +1,174 @@
++#!/usr/bin/env python3
++"""Native Wayland file-drop source and destination for the Windows VM."""
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import threading
++
++import gi
++gi.require_version('Gtk', '4.0')
++gi.require_version('Gdk', '4.0')
++from gi.repository import Gdk, Gio, GLib, Gtk
++
++
++class Transfers(Gtk.Application):
++    def __init__(self):
++        super().__init__(application_id='org.omarchy.FileTransfers', flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
++        self.window = None
++        self.worker = None
++        self.pending = []
++        self.state = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/' + str(os.getuid()))) / 'try-omarchy-clipboard'
++        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
++        self.cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'try-omarchy-transfers'
++        self.cache.mkdir(mode=0o700, parents=True, exist_ok=True)
++
++    def do_command_line(self, command):
++        self.activate()
++        args = command.get_arguments()[1:]
++        if len(args) == 2 and args[0] == '--ticket':
++            path = Path(args[1])
++            if path.parent != self.state or not path.name.startswith('incoming-drop-') or path.is_symlink():
++                self.status.set_label('The file-drop request is invalid.')
++                return 1
++            if len(self.pending) >= 32:
++                path.unlink(missing_ok=True)
++                self.status.set_label('Finish another transfer before receiving more files.')
++                return 1
++            self.pending.append(path)
++            self.next_download()
++        return 0
++
++    def do_activate(self):
++        if self.window:
++            self.window.present()
++            return
++        self.window = Gtk.ApplicationWindow(application=self, title='Files between Windows and Omarchy', default_width=560, default_height=400)
++        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=20, margin_bottom=20, margin_start=20, margin_end=20)
++        box.append(Gtk.Label(label='Drop files here to send them to Windows.\nDrag received files below into Files or another application.', wrap=True))
++        target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
++        target.connect('drop', self.drop)
++        box.add_controller(target)
++        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
++        scroll = Gtk.ScrolledWindow(vexpand=True, child=self.list)
++        box.append(scroll)
++        self.status = Gtk.Label(label='Ready to receive files', wrap=True)
++        box.append(self.status)
++        controls = Gtk.Box(spacing=12)
++        choose = Gtk.Button(label='Choose files…')
++        choose.connect('clicked', self.choose)
++        controls.append(choose)
++        self.cancel = Gtk.Button(label='Cancel transfer', sensitive=False)
++        self.cancel.connect('clicked', self.cancel_transfer)
++        controls.append(self.cancel)
++        box.append(controls)
++        self.window.set_child(box)
++        self.window.connect('close-request', self.close)
++        self.window.present()
++
++    def choose(self, *_):
++        dialog = Gtk.FileDialog(title='Send files to Windows')
++        def selected(dialog, result):
++            try:
++                files = dialog.open_multiple_finish(result)
++                self.send([files.get_item(i).get_path() for i in range(files.get_n_items())])
++            except GLib.Error:
++                pass
++        dialog.open_multiple(self.window, None, selected)
++
++    def drop(self, _target, selection, _x, _y):
++        paths = [file.get_path() for file in selection.get_files()]
++        return self.send(paths)
++
++    def send(self, paths):
++        if self.worker or not paths or any(not path for path in paths):
++            self.status.set_label('Finish the current transfer before sending more files.')
++            return False
++        data = ''.join(Path(path).as_uri() + '\n' for path in paths).encode()
++        self.start(['file-transfer', 'drop-send', '--state', str(self.state)], data)
++        return True
++
++    def next_download(self):
++        if self.worker or not self.pending:
++            return
++        ticket = self.pending.pop(0)
++        destination = self.cache / ('received-' + os.urandom(16).hex())
++        self.start(['file-transfer', 'download', '--ticket', str(ticket), '--destination', str(destination)], None, ticket)
++
++    def start(self, arguments, data=None, ticket=None):
++        self.status.set_label('Transferring files…')
++        self.cancel.set_sensitive(True)
++        try:
++            self.worker = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
++        except OSError as error:
++            self.status.set_label(str(error))
++            self.cancel.set_sensitive(False)
++            if ticket:
++                ticket.unlink(missing_ok=True)
++            GLib.idle_add(self.next_download)
++            return
++        worker = self.worker
++        def run():
++            output, error = worker.communicate(data)
++            GLib.idle_add(self.finished, worker, output, error, ticket)
++        threading.Thread(target=run, daemon=True).start()
++
++    def finished(self, worker, output, error, ticket):
++        if ticket:
++            ticket.unlink(missing_ok=True)
++        if worker is not self.worker:
++            return False
++        self.worker = None
++        self.cancel.set_sensitive(False)
++        if worker.returncode:
++            self.status.set_label(error.decode(errors='replace')[:1000] or 'Transfer cancelled. Original files were kept.')
++        else:
++            self.status.set_label('Files transferred. Original files were kept.')
++            if ticket:
++                try:
++                    for path in json.loads(output)['paths']:
++                        self.add_received(path)
++                except (ValueError, KeyError, TypeError):
++                    self.status.set_label('Files were received, but the transfer result could not be read.')
++        self.next_download()
++        return False
++
++    def add_received(self, path):
++        file = Gio.File.new_for_path(path)
++        row = Gtk.ListBoxRow(child=Gtk.Label(label=Path(path).name, xalign=0, margin_top=8, margin_bottom=8))
++        drag = Gtk.DragSource(actions=Gdk.DragAction.COPY)
++        drag.connect('prepare', lambda *_: Gdk.ContentProvider.new_for_value(Gdk.FileList.new_from_list([file])))
++        row.add_controller(drag)
++        self.list.append(row)
++
++    def cancel_transfer(self, *_):
++        if self.worker:
++            worker = self.worker
++            try:
++                worker.terminate()
++            except ProcessLookupError:
++                return
++            def kill_if_needed():
++                if worker.poll() is None:
++                    try:
++                        worker.kill()
++                    except ProcessLookupError:
++                        pass
++                return False
++            GLib.timeout_add(2000, kill_if_needed)
++
++    def close(self, *_):
++        if self.worker:
++            self.cancel_transfer()
++            self.status.set_label('Cancelling transfer. Close this window after it finishes.')
++            return True
++        for ticket in self.pending:
++            ticket.unlink(missing_ok=True)
++        self.pending.clear()
++        self.window = None
++        return False
++
++
++if __name__ == '__main__':
++    sys.exit(Transfers().run(sys.argv))
+diff --git a/guest/factory-overlay/usr/share/applications/try-omarchy-file-transfers.desktop b/guest/factory-overlay/usr/share/applications/try-omarchy-file-transfers.desktop
+new file mode 100644
+index 0000000..7d8b6c9
+--- /dev/null
++++ b/guest/factory-overlay/usr/share/applications/try-omarchy-file-transfers.desktop
+@@ -0,0 +1,8 @@
++[Desktop Entry]
++Type=Application
++Name=Files between Windows and Omarchy
++Comment=Drop files to send them to Windows or receive files from Windows
++Exec=file-transfer-window
++Icon=folder-remote
++Terminal=false
++Categories=Utility;FileTools;
+diff --git a/guest/packages.lock.json b/guest/packages.lock.json
+index c5f8cab..52807d2 100644
+--- a/guest/packages.lock.json
++++ b/guest/packages.lock.json
+@@ -664,6 +664,6 @@
+     "zram-generator": "1.2.1-1",
+     "zstd": "1.5.7-3"
+   },
+-  "requestedFileSha256": "563392f5b3d00dc8d2925f0e5bd2941ffebf62e3d832c632e7f405cf42ae624a",
++  "requestedFileSha256": "0b19e6dd2b1b201a03985dd58cc910ba26212210d2699d78773bf43a2b1f81d7",
+   "schemaVersion": 1
+ }
+diff --git a/guest/packages.txt b/guest/packages.txt
+index 3b86a52..f8c3265 100644
+--- a/guest/packages.txt
++++ b/guest/packages.txt
+@@ -24,6 +24,7 @@ fzf
+ git
+ gnome-keyring
+ gpu-screen-recorder
++gtk4
+ grim
+ gum
+ gvfs
+@@ -65,6 +66,7 @@ playerctl
+ plocate
+ polkit
+ python
++python-gobject
+ qrencode
+ qt6-wayland
+ quickshell
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index aa570e4..7d50139 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -96,6 +96,8 @@ compat_paths=(
+   usr/local/bin/clipboard-bridge
+   usr/local/bin/clipboard-files
+   usr/local/bin/file-transfer
++  usr/local/bin/file-transfer-window
++  usr/share/applications/try-omarchy-file-transfers.desktop
+   etc/systemd/system/try-omarchy-ready.service
+   etc/systemd/system/multi-user.target.wants/try-omarchy-ready.service
+   etc/systemd/system/try-omarchy-sshd.service
+diff --git a/guest/tests/test_file_transfer.py b/guest/tests/test_file_transfer.py
+index 1825db4..3ed3142 100644
+--- a/guest/tests/test_file_transfer.py
++++ b/guest/tests/test_file_transfer.py
+@@ -173,3 +173,17 @@ class StreamingFileTests(unittest.TestCase):
+             (source / 'link').symlink_to(root / 'outside')
+             with self.assertRaises(ValueError):
+                 transfer.clipboard_selection_key([source])
++
++    def test_cancelled_download_releases_host_ticket(self):
++        from unittest.mock import patch, MagicMock
++        ticket = {'id': 'a' * 32, 'token': 'b' * 64, 'direction': 'download',
++                  'offer': {'archiveBytes': 100, 'fileBytes': 10, 'entries': 1, 'sha256': 'c' * 64}}
++        connection = MagicMock()
++        connection.getresponse.side_effect = KeyboardInterrupt()
++        with patch.object(transfer, 'valid_ticket', return_value=True), \
++             patch.object(transfer.http.client, 'HTTPConnection', return_value=connection), \
++             patch.object(transfer, 'cancel_ticket') as cancel:
++            with self.assertRaises(KeyboardInterrupt):
++                transfer.download(ticket, Path('/unused'), '127.0.0.1', 1234)
++            cancel.assert_called_once_with(ticket, '127.0.0.1', 1234)
++            connection.close.assert_called()
+diff --git a/guest/tests/test_file_transfer_window.py b/guest/tests/test_file_transfer_window.py
+new file mode 100644
+index 0000000..986da3e
+--- /dev/null
++++ b/guest/tests/test_file_transfer_window.py
+@@ -0,0 +1,52 @@
++import importlib.machinery
++import importlib.util
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++
++
++@unittest.skipUnless(os.environ.get('TRYOMARCHY_GTK_TEST') == '1', 'native GTK desktop required')
++class FileTransferWindowTests(unittest.TestCase):
++    def test_native_drag_formats_and_drop_preserve_source(self):
++        helper = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/bin/file-transfer-window'
++        loader = importlib.machinery.SourceFileLoader('file_transfer_window', str(helper))
++        spec = importlib.util.spec_from_loader(loader.name, loader)
++        module = importlib.util.module_from_spec(spec)
++        loader.exec_module(module)
++        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, XDG_CACHE_HOME=tmp):
++            app = module.Transfers()
++            app.set_application_id('org.omarchy.FileTransfers.Test')
++            app.state = Path(tmp) / 'state'
++            app.state.mkdir()
++            app.register(None)
++            app.activate()
++            try:
++                path = Path(tmp) / 'dragged 世界.txt'
++                path.write_text('preserved')
++                app.add_received(str(path))
++                row = app.list.get_row_at_index(0)
++                controllers = row.observe_controllers()
++                sources = [controllers.get_item(i) for i in range(controllers.get_n_items())
++                           if isinstance(controllers.get_item(i), module.Gtk.DragSource)]
++                self.assertEqual(len(sources), 1)
++                provider = sources[0].emit('prepare', 0.0, 0.0)
++                self.assertTrue(provider.ref_formats().contain_gtype(module.Gdk.FileList))
++                with patch.object(app, 'start') as start:
++                    self.assertTrue(app.drop(None, module.Gdk.FileList.new_from_list(
++                        [module.Gio.File.new_for_path(str(path))]), 0, 0))
++                    self.assertEqual(start.call_args.args[0][1], 'drop-send')
++                    self.assertIn(path.as_uri().encode(), start.call_args.args[1])
++                self.assertEqual(path.read_text(), 'preserved')
++                with patch.object(module.subprocess, 'Popen', side_effect=FileNotFoundError('helper missing')), \
++                     patch.object(module.GLib, 'idle_add') as idle:
++                    ticket = app.state / 'incoming-drop-test'
++                    ticket.write_text('{}')
++                    app.start(['missing'], ticket=ticket)
++                    self.assertFalse(ticket.exists())
++                    self.assertIsNone(app.worker)
++                    idle.assert_called_once_with(app.next_download)
++            finally:
++                app.window.destroy()
++                app.quit()
+-- 
+2.55.0
+

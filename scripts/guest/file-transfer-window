@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Native Wayland file-drop source and destination for the Windows VM."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import threading
+
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Gdk', '4.0')
+from gi.repository import Gdk, Gio, GLib, Gtk
+
+
+class Transfers(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id='org.omarchy.FileTransfers', flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.window = None
+        self.worker = None
+        self.pending = []
+        self.state = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/' + str(os.getuid()))) / 'try-omarchy-clipboard'
+        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'try-omarchy-transfers'
+        self.cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    def do_command_line(self, command):
+        self.activate()
+        args = command.get_arguments()[1:]
+        if len(args) == 2 and args[0] == '--ticket':
+            path = Path(args[1])
+            if path.parent != self.state or not path.name.startswith('incoming-drop-') or path.is_symlink():
+                self.status.set_label('The file-drop request is invalid.')
+                return 1
+            if len(self.pending) >= 32:
+                path.unlink(missing_ok=True)
+                self.status.set_label('Finish another transfer before receiving more files.')
+                return 1
+            self.pending.append(path)
+            self.next_download()
+        return 0
+
+    def do_activate(self):
+        if self.window:
+            self.window.present()
+            return
+        self.window = Gtk.ApplicationWindow(application=self, title='Files between Windows and Omarchy', default_width=560, default_height=400)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_top=20, margin_bottom=20, margin_start=20, margin_end=20)
+        box.append(Gtk.Label(label='Drop files here to send them to Windows.\nDrag received files below into Files or another application.', wrap=True))
+        target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        target.connect('drop', self.drop)
+        box.add_controller(target)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        scroll = Gtk.ScrolledWindow(vexpand=True, child=self.list)
+        box.append(scroll)
+        self.status = Gtk.Label(label='Ready to receive files', wrap=True)
+        box.append(self.status)
+        controls = Gtk.Box(spacing=12)
+        choose = Gtk.Button(label='Choose files…')
+        choose.connect('clicked', self.choose)
+        controls.append(choose)
+        self.cancel = Gtk.Button(label='Cancel transfer', sensitive=False)
+        self.cancel.connect('clicked', self.cancel_transfer)
+        controls.append(self.cancel)
+        box.append(controls)
+        self.window.set_child(box)
+        self.window.connect('close-request', self.close)
+        self.window.present()
+
+    def choose(self, *_):
+        dialog = Gtk.FileDialog(title='Send files to Windows')
+        def selected(dialog, result):
+            try:
+                files = dialog.open_multiple_finish(result)
+                self.send([files.get_item(i).get_path() for i in range(files.get_n_items())])
+            except GLib.Error:
+                pass
+        dialog.open_multiple(self.window, None, selected)
+
+    def drop(self, _target, selection, _x, _y):
+        paths = [file.get_path() for file in selection.get_files()]
+        return self.send(paths)
+
+    def send(self, paths):
+        if self.worker or not paths or any(not path for path in paths):
+            self.status.set_label('Finish the current transfer before sending more files.')
+            return False
+        data = ''.join(Path(path).as_uri() + '\n' for path in paths).encode()
+        self.start(['file-transfer', 'drop-send', '--state', str(self.state)], data)
+        return True
+
+    def next_download(self):
+        if self.worker or not self.pending:
+            return
+        ticket = self.pending.pop(0)
+        destination = self.cache / ('received-' + os.urandom(16).hex())
+        self.start(['file-transfer', 'download', '--ticket', str(ticket), '--destination', str(destination)], None, ticket)
+
+    def start(self, arguments, data=None, ticket=None):
+        self.status.set_label('Transferring files…')
+        self.cancel.set_sensitive(True)
+        try:
+            self.worker = subprocess.Popen(arguments, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
+        except OSError as error:
+            self.status.set_label(str(error))
+            self.cancel.set_sensitive(False)
+            if ticket:
+                ticket.unlink(missing_ok=True)
+            GLib.idle_add(self.next_download)
+            return
+        worker = self.worker
+        def run():
+            output, error = worker.communicate(data)
+            GLib.idle_add(self.finished, worker, output, error, ticket)
+        threading.Thread(target=run, daemon=True).start()
+
+    def finished(self, worker, output, error, ticket):
+        if ticket:
+            ticket.unlink(missing_ok=True)
+        if worker is not self.worker:
+            return False
+        self.worker = None
+        self.cancel.set_sensitive(False)
+        if worker.returncode:
+            self.status.set_label(error.decode(errors='replace')[:1000] or 'Transfer cancelled. Original files were kept.')
+        else:
+            self.status.set_label('Files transferred. Original files were kept.')
+            if ticket:
+                try:
+                    for path in json.loads(output)['paths']:
+                        self.add_received(path)
+                except (ValueError, KeyError, TypeError):
+                    self.status.set_label('Files were received, but the transfer result could not be read.')
+        self.next_download()
+        return False
+
+    def add_received(self, path):
+        file = Gio.File.new_for_path(path)
+        row = Gtk.ListBoxRow(child=Gtk.Label(label=Path(path).name, xalign=0, margin_top=8, margin_bottom=8))
+        drag = Gtk.DragSource(actions=Gdk.DragAction.COPY)
+        drag.connect('prepare', lambda *_: Gdk.ContentProvider.new_for_value(Gdk.FileList.new_from_list([file])))
+        row.add_controller(drag)
+        self.list.append(row)
+
+    def cancel_transfer(self, *_):
+        if self.worker:
+            worker = self.worker
+            try:
+                worker.terminate()
+            except ProcessLookupError:
+                return
+            def kill_if_needed():
+                if worker.poll() is None:
+                    try:
+                        worker.kill()
+                    except ProcessLookupError:
+                        pass
+                return False
+            GLib.timeout_add(2000, kill_if_needed)
+
+    def close(self, *_):
+        if self.worker:
+            self.cancel_transfer()
+            self.status.set_label('Cancelling transfer. Close this window after it finishes.')
+            return True
+        for ticket in self.pending:
+            ticket.unlink(missing_ok=True)
+        self.pending.clear()
+        self.window = None
+        return False
+
+
+if __name__ == '__main__':
+    sys.exit(Transfers().run(sys.argv))

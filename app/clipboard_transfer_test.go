@@ -40,7 +40,8 @@ func TestStreamingClipboardGuestRoundTrip(t *testing.T) {
 	defer push.Close()
 	_, pushPort, _ := net.SplitHostPort(push.Addr().String())
 	delivered := make(chan []string, 1)
-	bridge := &clipBridge{transfers: service, setPaths: func(paths []string) bool { delivered <- paths; return true }}
+	dropped := make(chan []string, 1)
+	bridge := &clipBridge{transfers: service, setDropPaths: func(paths []string) bool { dropped <- paths; return true }, setPaths: func(paths []string) bool { delivered <- paths; return true }}
 	go bridge.acceptPush(push)
 	source := filepath.Join(t.TempDir(), "large file.txt")
 	// Exceed the old 16 MiB clipboard bound with highly compressible contents.
@@ -71,6 +72,7 @@ assert received and b'file://' in received[0]
 assert m.clipboard_send(received[0],state,host,port,push)['state']=='unchanged'
 (state/'last_file_selection').unlink()
 assert m.clipboard_send(received[0],state,host,port,push)['state']=='completed'
+assert m.clipboard_send(received[0],state,host,port,push,purpose='drop')['state']=='completed'
 assert m.clipboard_send(received[0],state,host,port,push)['state']=='unchanged'
 `
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -78,6 +80,11 @@ assert m.clipboard_send(received[0],state,host,port,push)['state']=='unchanged'
 	command := exec.CommandContext(ctx, python, "-c", script, filepath.Join("..", "scripts", "guest", "file-transfer"), t.TempDir(), metadata, host, port, pushPort)
 	if data, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("guest clipboard: %v: %s", err, data)
+	}
+	select {
+	case <-dropped:
+	case <-time.After(time.Second):
+		t.Fatal("file-drop adapter was not called")
 	}
 	select {
 	case paths := <-delivered:

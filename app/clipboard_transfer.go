@@ -26,10 +26,15 @@ func validClipboardTicket(ticket fileTransferTicket) bool {
 // The clipboard selection authorizes a copy into a private cache, never a path
 // supplied by the guest. Publish CF_HDROP only after the upload is verified.
 func (b *clipBridge) receiveClipboardTransfer(conn net.Conn, line string) {
-	if len(line) > 4096 || b.setPaths == nil {
+	drop := strings.HasPrefix(line, "drop-offer:")
+	publish := b.setPaths
+	if drop {
+		publish = b.setDropPaths
+	}
+	if len(line) > 4096 || publish == nil {
 		return
 	}
-	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(line, "files-offer:")))
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "files-offer:"), "drop-offer:")))
 	var offer fileTransferOffer
 	if err != nil || json.Unmarshal(data, &offer) != nil || !offer.valid(b.transfers.limits) {
 		return
@@ -64,7 +69,7 @@ func (b *clipBridge) receiveClipboardTransfer(conn net.Conn, line string) {
 		return
 	}
 	// A newer Windows selection wins over a transfer that was already underway.
-	if b.sequence != nil && b.sequence() != sequence {
+	if !drop && b.sequence != nil && b.sequence() != sequence {
 		fmt.Fprintln(conn, "superseded")
 		return
 	}
@@ -76,12 +81,14 @@ func (b *clipBridge) receiveClipboardTransfer(conn net.Conn, line string) {
 	for _, entry := range entries {
 		paths = append(paths, filepath.Join(destination, entry.Name()))
 	}
-	if !b.setPaths(paths) {
+	if !publish(paths) {
 		return
 	}
-	b.state = clipboardSyncState{}
-	if b.sequence != nil {
-		b.lastSequence = b.sequence()
+	if !drop {
+		b.state = clipboardSyncState{}
+		if b.sequence != nil {
+			b.lastSequence = b.sequence()
+		}
 	}
 	fmt.Fprintln(conn, "complete")
 }
