@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,5 +89,39 @@ func TestCreatePortableCopyRoundTrip(t *testing.T) {
 	}
 	if err := createPortableCopyUsingTool(dir, destination, launcher, tool, nil); err == nil {
 		t.Fatal("replaced existing portable copy")
+	}
+	for _, mode := range []string{"cancel", "tool-failure", "pending-update"} {
+		t.Run(mode, func(t *testing.T) {
+			configureSetupCancellation(false)
+			t.Cleanup(func() { configureSetupCancellation(false) })
+			failedDestination := filepath.Join(t.TempDir(), "portable")
+			selectedTool := tool
+			if mode == "tool-failure" {
+				selectedTool = filepath.Join(t.TempDir(), "missing-tool")
+			}
+			if mode == "pending-update" {
+				pending := filepath.Join(dir, payloadUpdateStateFilename)
+				if err := os.WriteFile(pending, []byte("pending"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.Remove(pending) })
+			}
+			err := createPortableCopyUsingTool(dir, failedDestination, launcher, selectedTool, func(int64, int64, string) {
+				if mode == "cancel" {
+					requestSetupCancel()
+				}
+			})
+			if err == nil || (mode == "cancel" && !errors.Is(err, errSetupCancelled)) {
+				t.Fatalf("unexpected failure result: %v", err)
+			}
+			entries, err := os.ReadDir(filepath.Dir(failedDestination))
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("failure left output or staging: %v (%v)", entries, err)
+			}
+			current, err := os.ReadFile(filepath.Join(dir, "vm", "disk.raw"))
+			if err != nil || !bytes.Equal(current, before) {
+				t.Fatalf("failure modified the source: %v", err)
+			}
+		})
 	}
 }

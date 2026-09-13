@@ -1024,3 +1024,45 @@ The test guest and loopback asset server are stopped. C: retains approximately
 22.6 GiB free. Full-feature completion and the disclosed hardware/portable gates
 remain follow-up work; this publication completes the user-authorized preview
 release, not those remaining features.
+
+## Post-release portable space and Windows publication fixes
+
+The normal raw-installation portable path now inventories the backup allowlist,
+hashes files, counts nonzero 64 KiB blocks, budgets QCOW2 metadata, copies and
+verifies the payload files, and converts the original raw disk directly into
+standalone QCOW2 in private staging. `qemu-img compare` verifies logical contents
+before publication. It creates neither an intermediate backup archive nor a
+restored raw disk. The source is retained. QCOW2-source copies keep their existing
+factory-verification/materialization path and its larger space requirements.
+
+Native Windows regressions using the released r15 qemu-img pass for a sparse
+32 MiB source with only 4 MiB available above the production reserve, unchanged
+payload bytes, excluded recovery data, full-disk rejection before output,
+cancellation, missing conversion tool, pending update, and source preservation.
+The complete portable-copy round trip remains covered by real conversion and
+materialization tests.
+
+The full suite exposed transient access-denied failures in move recovery and
+snapshot rollback publication. The Windows publication wrapper now retries only
+access/sharing/locking errors for at most 15 attempts, 200 ms apart. Recovery
+remains available after cancellation. A native exclusive-handle test verifies
+that publication succeeds when the temporary lock closes; permanent and exhausted
+errors remain failures. The full native Go suite subsequently passed (27.738 s),
+along with vet and focused portable/publication tests after the final change.
+
+The actual stopped installation's read-only inventory found 286 entries and a
+14,349,893,632-byte budget including the standard reserve, versus a
+25,769,803,776-byte virtual disk. The acceptance harness additionally reserves
+nine GiB, leaving ten GiB total headroom. Its large-copy attempt was rejected at
+preflight and removed its empty private stage; no portable payload or disk was
+created. Evidence: `portable-efficient-preflight.txt`,
+`portable-efficient-create.txt`, and `portable_acceptance_test.go` under the
+acceptance directory. The harness uses the source's loopback receipt identity.
+
+C: unexpectedly fell from the release checkpoint's roughly 22.6 GiB free to
+roughly 4.9 GiB before this copy could begin. The cause is not established. The
+new source clone is only 8.7 MB, recent Go-cache files total about 157 MB, and
+the active raw disk's allocated ranges total 6,892,027,904 bytes. Read-only scans
+found no newly created large acceptance artifact explaining the change. The
+guarded rejection is not a successful installed-guest portable lifecycle test.
+No previously denied deletion was retried, and no Windows reboot was attempted.

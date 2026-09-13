@@ -4,10 +4,53 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
+
+func TestWindowsMoveRetriesTemporaryLock(t *testing.T) {
+	for _, code := range []syscall.Errno{5, 32, 33, 3} {
+		calls, pauses := 0, 0
+		err := publishWindowsMoveWith("from", "to", func(string, string) error {
+			calls++
+			return code
+		}, func(time.Duration) { pauses++ })
+		wantCalls := 15
+		if code == 3 {
+			wantCalls = 1
+		}
+		if !errors.Is(err, code) || calls != wantCalls || pauses != wantCalls-1 {
+			t.Fatalf("error %d: calls=%d pauses=%d err=%v", code, calls, pauses, err)
+		}
+	}
+}
+
+func TestWindowsMoveSucceedsAfterNativeHandleCloses(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source")
+	target := source + "-published"
+	if err := os.WriteFile(source, []byte("preserve bytes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openBackupDisk(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan struct{})
+	go func() { time.Sleep(100 * time.Millisecond); f.Close(); close(closed) }()
+	err = publishWindowsMove(source, target)
+	<-closed
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "preserve bytes" {
+		t.Fatalf("published data: %q (%v)", data, err)
+	}
+}
 
 func TestMoveRejectsAlternateStreamsBeforeCopyAndCleanup(t *testing.T) {
 	s, source, destination := moveFixture(t)

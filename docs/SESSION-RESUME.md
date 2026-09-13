@@ -1,5 +1,15 @@
 # Resume here
 
+Post-release work: `codex/portable-space-efficiency` replaces raw-installation
+portable creation's archive/raw staging with direct verified QCOW2 conversion.
+Real-QEMU compact-copy, space rejection, cancellation, source preservation and
+native Windows rename-lock tests pass. Windows move/snapshot publication now
+retries transient locks; the complete native suite and vet pass after that fix.
+The large installed-guest copy remains unproven: a guarded attempt stopped at
+preflight without copying payloads after C: free space fell to about 4.9 GiB.
+Do not retry it or remove previously denied recovery data. See the report's
+post-release checkpoint for evidence and the unresolved space change.
+
 Current release decision (September 13, after the laptop acceptance): the user
 explicitly requested publishing **v0.0.18-preview as the latest preview**, with
 proper release notes and external contributor acknowledgments. Ship the tested
