@@ -965,3 +965,62 @@ laptop has no LLVM resource tools. Input JSON is retained as
 `release18-resource.json` in the acceptance directory. The existing resource
 tests validate both compiled numeric versions and both text versions.
 The signed-package smoke and publication are recorded in the next checkpoint.
+
+## Signed v0.0.18-preview package acceptance
+
+PR #110 merged as `5e8e43bb9ce79176e5651fd19379808da8e9570f`.
+Both the preparation CI (`34787698373`) and merged-master CI (`34787818447`)
+passed all three required jobs. Azure signing-check run `34787825540` passed.
+The downloaded signed launcher SHA256 is
+`d9742f2d525a84ca2db080f6ff731ab4b124353c0a886ec42c4b016e93fc7187`.
+Windows reports Valid Authenticode, signer Brandon South, and file version
+v0.0.18-preview. The signed update metadata verifies with the launcher's trust key.
+
+Using the existing disposable Unicode-path installation and explicitly selecting
+the bundled runtime, the signed launcher passes:
+
+- Authenticated delivery of the final release manifest and unchanged r15 runtime.
+- GPU boot and userspace readiness at 17:50:28, with the update confirmed.
+- Both persistent fixture hashes unchanged, with the packaged Vulkan environment
+  inherited by the desktop session.
+- Default Vulkan mpv playback through 100%, exit 0, 15.465 seconds, with a native
+  screenshot at frame 280. One frame was reported dropped. The first scripted
+  attempt ran before the Wayland desktop environment was ready and exited 2;
+  the successful attempt explicitly waited for the graphical session.
+- Clean poweroff at 17:51:35, normal relaunch at 17:51:54, and userspace readiness
+  at 17:52:06 without another payload update.
+- Persistent hashes still match on the second boot; clean poweroff at 17:52:48.
+
+All eleven draft assets (ten payloads plus SHA256SUMS) also match GitHub's stored
+SHA256 digests. The signed smoke used loopback URLs because draft assets require
+authentication; the compiled defaults pin the public v0.0.18-preview URL.
+
+Evidence under the acceptance root: `signed-v18-verification.json`,
+`signed-v18-draft-asset-verification.json`, `signed-v18-smoke.txt` (early attempt),
+`signed-v18-desktop-ready-smoke.txt`, `signed-v18-video.log`,
+`signed-v18-video.png`, `signed-v18-relaunch.txt`, `signed-v18-shell.log`, and
+`signed-v18-evidence-hashes.json`. No new VM disk was created. The publication
+workflow is run `34788070204`, building the same merged application source.
+
+## Publication complete
+
+[v0.0.18-preview](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview)
+was published at 2026-09-13 22:57:58 UTC and promoted to Latest. Release workflow
+`34788070204` passed every required step, including Windows race tests and vet,
+Azure signing, authenticated update metadata, and public tagged/Latest checks
+for both `omacom/try-omarchy-windows` and the redirected `tsouth89` repository.
+All 17 release assets are present. Published notes include the remaining preview
+limitations and acknowledgments for external contributors and issue reporters.
+
+An independent unauthenticated download from the public Latest URL on this
+laptop passed launcher checksum, Valid Authenticode, file version, embedded
+manifest pin, and Ed25519 update-signature verification. The published EXE SHA256
+is `e7a274b57d3e85ebce987b1ee9dcf7377d924893127edae8d2f83685c8a37a9f`.
+Its checksum differs from the signing-check EXE because the publish workflow
+signs its own build of the same source. Evidence is
+`public-v18-verification.json`, with downloaded public files under `public-v18`.
+
+The test guest and loopback asset server are stopped. C: retains approximately
+22.6 GiB free. Full-feature completion and the disclosed hardware/portable gates
+remain follow-up work; this publication completes the user-authorized preview
+release, not those remaining features.
