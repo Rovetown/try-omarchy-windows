@@ -258,7 +258,9 @@ python "$recipe/archive.py" "$source_bundle" "$source_zip" --epoch "$source_date
 )
 
 mkdir -p "$output/smoke"
-cp "$runtime/bin/qemu-system-x86_64.exe" "$output/smoke/"
+for binary in qemu-system-x86_64.exe qemu-system-x86_64w.exe qemu-img.exe; do
+    cp "$runtime/bin/$binary" "$output/smoke/"
+done
 cp "$runtime/bin"/*.dll "$output/smoke/"
 cp -R "$runtime/bin/share" "$output/smoke/"
 python "$recipe/verify.py" "$output"
