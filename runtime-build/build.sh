@@ -103,6 +103,7 @@ git -C "$qemu_source/roms/edk2" submodule update --init --depth=1
 apply_locked_patches qemu "$qemu_source"
 apply_locked_patches virglrenderer "$virgl_source"
 python "$recipe/test-win32-handles.py" "$virgl_source"
+python "$recipe/test-host-memory.py" "$virgl_source"
 python "$recipe/test-usb-port.py" "$qemu_source/hw/usb/host-libusb.c"
 python "$recipe/test-socket-close.py" "$qemu_source/util/oslib-win32.c"
 python "$recipe/test-file-drop.py" "$qemu_source/ui/sdl2.c"

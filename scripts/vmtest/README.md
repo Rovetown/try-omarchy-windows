@@ -151,6 +151,11 @@ implement or validate a Venus/QEMU sharing path. Devices lacking the extension
 are explicitly reported as skipped, not passed. Keep the JSON output with the
 host driver identity and integrated guest playback results.
 
+Add `--image-tiling linear` or `--image-tiling optimal` to the host-import probe
+to allocate a host-imported RGBA8 image, clear it on the GPU, copy it into the
+shared buffer, and verify all pixels through both Windows mappings. This tests
+image allocation and transfers, beyond the separate capability-only probe.
+
 The third queries RGBA8 linear/optimal image support and memory-type masks for
 ordinary, Win32-exportable and host-importable images. It does not allocate image
 memory or prove guest playback. On the AMD laptop, host-importable images support
