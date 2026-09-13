@@ -64,6 +64,7 @@ jobs:
           grep -F 'auto-reconnect' runtime-output/smoke/usb-properties.txt
           python runtime-build/smoke-usb.py runtime-output/smoke/qemu-system-x86_64.exe
           python runtime-build/smoke-memory.py runtime-output/smoke/qemu-system-x86_64.exe
+          python runtime-build/smoke-unicode-paths.py runtime-output/smoke
 
       - name: Verify archives
         shell: pwsh
