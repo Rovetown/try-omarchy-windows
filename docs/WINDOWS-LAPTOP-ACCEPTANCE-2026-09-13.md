@@ -510,3 +510,31 @@ identity and both fixture hashes every minute, and records host CPU, working set
 and C: free space. It fails below a 2 GiB host reserve. No one-hour pass is claimed
 until r12-endurance-result.json records completion. Vulkan playback and remaining
 hardware/lifecycle gates still prevent release acceptance.
+
+All three native r12 windows subsequently showed the rendered lock screen after
+power cycling (r12-display1-after-dpms.jpg through r12-display3-after-dpms.jpg).
+This confirms rendering, not physical keyboard focus or a multi-monitor layout.
+Fresh r12 shared-folder Unicode CRUD and launcher TCP/UDP forwarding round trips
+also pass: r12-share-crud.json, r12-share-host-hash.json and
+r12-launcher-forwards.json.
+
+The next portable round has an isolated source build with the combined r12 and
+guest19-r2 manifest embedded. Its launcher SHA256 is
+6e5b5605da2d45731fd3e8e090d16e708c136f59f31248c6db068b3da5898640.
+Candidate source, combined assets and build identity remain under the acceptance
+root. Assets use hard links to existing verified downloads to avoid another
+large copy. Public launcher defaults and release pins remain unchanged. This
+build preparation is not portable creation or boot acceptance.
+
+The native AMD Vulkan host-import transfer probe passes: a 4,096-byte-aligned
+host allocation imported as memory type 1 was bound to a buffer, filled by GPU
+commands, synchronized with a transfer-to-host barrier and fence, and all 65,536
+bytes matched the expected pattern on CPU read. Evidence:
+probe-vulkan-host-import-transfer.py and host-vulkan-host-import-transfer.json.
+This narrows a possible implementation path; it does not fix guest Venus.
+The current runtime still forces OPAQUE_WIN32 external buffers, which this driver
+restricts to a memory type lacking HOST_VISIBLE. A correction must preserve
+buffer/image handle compatibility, mapping ownership and synchronization across
+the renderer and QEMU. The probe follows the Vulkan
+[host-pointer import contract](https://docs.vulkan.org/refpages/latest/refpages/source/VkImportMemoryHostPointerInfoEXT.html)
+and [pointer memory-type query](https://docs.vulkan.org/refpages/latest/refpages/source/vkGetMemoryHostPointerPropertiesEXT.html).
