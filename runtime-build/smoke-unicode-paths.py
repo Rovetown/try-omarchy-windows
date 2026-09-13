@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import runpy
 import subprocess
 import tempfile
 
@@ -10,6 +11,9 @@ parser=argparse.ArgumentParser()
 parser.add_argument('bin',type=Path)
 args=parser.parse_args()
 binary=args.bin.resolve()
+# Use the same bounded socket transport as the RAM smoke test. Windows QEMU
+# does not reliably consume redirected stdio before the producer closes it.
+VM = runpy.run_path(str(Path(__file__).with_name('smoke-memory.py')))['VM']
 with tempfile.TemporaryDirectory(prefix='tryomarchy-unicode-') as temporary:
     root=Path(temporary)/'Omarchy 世界 café'
     root.mkdir()
@@ -23,15 +27,11 @@ with tempfile.TemporaryDirectory(prefix='tryomarchy-unicode-') as temporary:
     for name in ('qemu-system-x86_64.exe','qemu-system-x86_64w.exe'):
         log=root/(name+'.log')
         trace=root/(name+'.serial')
-        result=subprocess.run([str(binary/name),'-machine','none','-nodefaults',
-            '-display','none','-S','-D',str(log),
+        with VM(binary/name, ['-D',str(log),
             '-chardev',f'file,id=trace,path={trace}',
-            '-drive',f'file={disk},format=raw,if=none,id=probe',
-            '-qmp','stdio'],input=b'{"execute":"qmp_capabilities"}\n{"execute":"quit"}\n',
-            stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
-        assert result.returncode==0,(name,result.stderr.decode('utf-8',errors='replace'))
-        replies=[json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-        assert any('QMP' in r for r in replies), replies
-        assert not any('error' in r for r in replies), replies
+            '-drive',f'file={disk},format=raw,if=none,id=probe']) as vm:
+            assert vm.call('query-status')['status'] == 'prelaunch'
+            vm.call('quit')
+            assert vm.process.wait(timeout=10) == 0
         assert log.is_file() and trace.is_file()
 print('ok - both QEMU launchers and qemu-img accept Unicode paths')
