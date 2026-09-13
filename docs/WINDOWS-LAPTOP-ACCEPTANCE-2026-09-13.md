@@ -5,6 +5,11 @@ release approval. The user selected the current launcher with runtime r7 and
 the corrected compatibility-19 guest-r2. Existing native Omarchy testing is
 outside this run's scope.
 
+Latest checkpoint: storage recovery and retained-source cleanup pass; runtime
+r12 is installed and its three-output DPMS checks pass. Its one-hour endurance
+run is in progress. Default Vulkan playback still fails on this AMD host.
+The dated sections below retain prior failures and superseded intermediate states.
+
 ## Candidate and evidence
 
 - Repository: `omacom/try-omarchy-windows`, branch `codex/full-feature-completion`.
@@ -55,7 +60,8 @@ Hyper-V role is disabled. Detailed facts are in `host-inventory.json`.
 | Backup and restore | Pass creation, cancellation, full disk hash verification, restored Unicode-path boot on r9 | Persistent fixture hashes also survive disk growth, reclaim and relaunch |
 | Awake idle / video CPU | Five-minute samples pass; default Vulkan playback fails | Idle mean host CPU 0.611639%; explicit OpenGL video mean 11.30079% |
 | One-hour endurance and host sleep/resume | Pending | Earlier individual sessions lasted less than one hour; host has not slept or rebooted |
-| Multiple displays | Launcher hostmem typing fixed; r10/r11 runtime fixes awaiting combined live retest | GPU secondary-output teardown assertion and CPU fullscreen stale-input divide-by-zero reproduced |
+| Multiple displays | r12 three-output GPU DPMS passes; secondary native rendering observed; full visual/input acceptance ongoing | r10 teardown, r11 stale-input and r12 GL-context sharing fixes; r12-gpu-dpms-cycles.txt |
+| Installation move | Pass cancellation, disk-full recovery, redirect boot and retained-source cleanup | move-cleanup-result.json; moved-guest-persistence.txt |
 | Launcher TCP/UDP forwards | Pass localhost round trips | `r9-launcher-forwards.json`; LAN/firewall remains separate |
 | Settings repair and diagnostics | Pass real installation | Decline preserves malformed bytes; repair retains backup; diagnostics redact path and omit disks/private key |
 
@@ -472,3 +478,35 @@ reboot, driver change or clock change was performed. Writes and further guest
 boots are paused until storage is available; release acceptance remains blocked.
 This report update was committed through the GitHub API because C: is full.
 After freeing space, fast-forward the local branch before recording more work.
+
+### Storage recovery and r12 integrated retest
+
+The user removed the redundant 6,491,469,142-byte acceptance backup ZIP.
+Normal move recovery then verified and activated `Move 世界/TryOmarchy`.
+Launching through the old `fresh-r7` path followed its redirect, booted the
+moved guest, and verified both persistent fixture hashes. After clean shutdown,
+the product's move-cleanup operation removed the retained source. The journal
+now contains only the redirect, with no pending or retained move. C: subsequently
+reported 33,979,215,872 free bytes. The original user installation is untouched.
+Evidence: move-recovered-boot-state.json, moved-guest-persistence.txt,
+move-cleanup-preflight.json, move-cleanup-result.json and move-cleanup-success.jpg.
+Historical source logs were preserved in r7-history before cleanup. The local
+branch was fast-forwarded to the remote evidence commit after space returned.
+
+Runtime r12 build 34770918856 passed CI and full local archive verification.
+The installed windowed executable SHA256 is
+1a9a80c22fa7f43da632675fe7afc4c888db533d325703614584826882b0bb9d.
+The restored Unicode-path guest reached readiness at current host time 12:37:26
+with three fullscreen GPU outputs. Native display 3 showed the desktop instead
+of a black surface. Three explicit DPMS off/on cycles returned all three guest
+outputs enabled with unchanged persistent fixture hashes. A later native display
+2 capture showed the rendered guest lock screen. Guest idle poweroff was disabled
+for the awake endurance portion; user unlock was requested without automating
+authentication. Desktop visual confirmation after those cycles remains pending.
+
+The r12 one-hour endurance monitor started at 17:42:42 UTC. It uses monotonic
+elapsed time, checks process identity, QMP running and disk I/O state, guest boot
+identity and both fixture hashes every minute, and records host CPU, working set
+and C: free space. It fails below a 2 GiB host reserve. No one-hour pass is claimed
+until r12-endurance-result.json records completion. Vulkan playback and remaining
+hardware/lifecycle gates still prevent release acceptance.
