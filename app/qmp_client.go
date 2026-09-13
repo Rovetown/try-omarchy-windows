@@ -150,13 +150,13 @@ func (c *qmpClient) Call(ctx context.Context, command string, arguments any, res
 	}
 	defer cleanup()
 	defer func() {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		var remote *qmpCommandError
 		if err != nil && !errors.As(err, &remote) {
 			c.broken = true
 			c.conn.Close()
-		}
-		if ctx.Err() != nil {
-			err = ctx.Err()
 		}
 	}()
 	if _, err = c.conn.Write(append(data, '\n')); err != nil {

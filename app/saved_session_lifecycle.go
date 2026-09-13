@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,12 @@ func (s *savedSessionCoordinator) Save(ctx context.Context, c *qmpClient, source
 		if err != nil {
 			recovery, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			if recoveryErr := recoverRunningSession(recovery, c); recoveryErr != nil {
+			control, closeControl, recoveryErr := savedSessionRecoveryConnection(recovery, c)
+			if recoveryErr == nil {
+				defer closeControl()
+				recoveryErr = recoverRunningSession(recovery, control)
+			}
+			if recoveryErr != nil {
 				err = errors.Join(err, fmt.Errorf("the guest could not be resumed automatically; keep its process and recovery files: %w", recoveryErr))
 			}
 		}
@@ -102,8 +108,31 @@ func recoverRunningSession(ctx context.Context, c *qmpClient) error {
 			}
 		}
 	}
-	// A failed block-job cleanup must not race a resumed guest. Leave the guest
-	// paused with its original disk when we cannot establish exclusive ownership.
+	// The save operation started with no disk jobs. Settle only jobs in its
+	// private namespace before resuming, including a lost cleanup reply.
+	var jobs []diskCopyJob
+	if err := c.Call(ctx, "query-jobs", nil, &jobs); err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		suffix := strings.TrimPrefix(job.ID, "tom-save-job-")
+		if suffix == job.ID || len(suffix) != 16 {
+			return fmt.Errorf("an unrelated disk operation prevents safe recovery")
+		}
+		if job.Status != "concluded" {
+			cancelErr := c.Call(ctx, "job-cancel", map[string]any{"id": job.ID}, nil)
+			if err := waitForDiskCopy(ctx, c, job.ID, nil, true); err != nil {
+				return errors.Join(cancelErr, err)
+			}
+		}
+		if err := c.Call(ctx, "job-dismiss", map[string]any{"id": job.ID}, nil); err != nil {
+			return err
+		}
+		if err := c.Call(ctx, "blockdev-del", map[string]any{"node-name": "tom-save-" + suffix}, nil); err != nil {
+			return err
+		}
+	}
+	// Leave the original guest paused if exclusive ownership is still unclear.
 	if err := idleSessionTransfers(ctx, c); err != nil {
 		return err
 	}
@@ -127,4 +156,30 @@ func recoverRunningSession(ctx context.Context, c *qmpClient) error {
 		return fmt.Errorf("guest did not resume: %s", state.Status)
 	}
 	return nil
+}
+
+// Interrupted QMP commands deliberately invalidate their stream. Reconnecting
+// allows recovery to inspect the result without replaying the interrupted command.
+func savedSessionRecoveryConnection(ctx context.Context, c *qmpClient) (*qmpClient, func(), error) {
+	select {
+	case c.gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+	address := c.conn.RemoteAddr()
+	c.conn.Close()
+	c.broken = true
+	<-c.gate
+	if address == nil || (address.Network() != "tcp" && address.Network() != "unix") {
+		return nil, nil, fmt.Errorf("runtime control address is unavailable for recovery")
+	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, address.Network(), address.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	fresh, err := newQMPClient(ctx, conn)
+	if err != nil {
+		return nil, nil, err
+	}
+	return fresh, func() { fresh.Close() }, nil
 }

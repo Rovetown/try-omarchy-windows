@@ -62,8 +62,11 @@ func TestWindowsShellDropData(t *testing.T) {
 		for i, want := range paths {
 			var path [32769]uint16
 			shell32.NewProc("DragQueryFileW").Call(medium.handle, uintptr(i), uintptr(unsafe.Pointer(&path[0])), uintptr(len(path)))
-			if syscall.UTF16ToString(path[:]) != want {
-				return fmt.Errorf("Shell changed dropped path")
+			got := syscall.UTF16ToString(path[:])
+			actual, actualErr := os.Stat(got)
+			expected, expectedErr := os.Stat(want)
+			if actualErr != nil || expectedErr != nil || !os.SameFile(actual, expected) {
+				return fmt.Errorf("Shell changed dropped file: %q instead of %q", got, want)
 			}
 		}
 		return nil
@@ -196,8 +199,13 @@ func TestNativeQEMUFileDropEvent(t *testing.T) {
 	for c.lines.Scan() {
 		paths, ok := droppedFilesEvent(c.lines.Text())
 		if ok {
-			if len(paths) != 1 || paths[0] != path {
-				t.Fatal("native drop changed paths", paths)
+			if len(paths) != 1 {
+				t.Fatal("native drop changed path count", paths)
+			}
+			actual, actualErr := os.Stat(paths[0])
+			expected, expectedErr := os.Stat(path)
+			if actualErr != nil || expectedErr != nil || !os.SameFile(actual, expected) {
+				t.Fatal("native drop changed file identity", paths)
 			}
 			return
 		}
