@@ -9,7 +9,9 @@ Latest checkpoint: storage recovery and retained-source cleanup pass; runtime
 r12 passed three-output GPU/CPU DPMS checks and its one-hour endurance run.
 Shutdown confirmation and forced GPU-to-CPU fallback also pass. Full snapshot
 creation and restore-as-copy now pass, including whole-disk hash verification
-and a real desktop boot. Rollback and portable lifecycle acceptance remain open.
+and a real desktop boot. Active rollback also passes disk, retained-state and
+guest-persistence checks; its Unicode recovery-shortcut failure is corrected.
+Portable lifecycle acceptance remains open.
 Default Vulkan playback still fails on this AMD host. Targeted renderer engineering
 has resumed; the final section records the r13 handle correction and native
 regressions. The earlier storage pause is historical; recheck current free space
@@ -17,7 +19,7 @@ before recovery operations.
 The dated sections below retain prior failures and superseded intermediate states.
 
 Open release gates include the AMD Vulkan playback failure, camera usability,
-full snapshot and portable lifecycle acceptance, physical keyboard/focus and
+portable lifecycle acceptance, physical keyboard/focus and
 monitor checks, and host sleep/network/device checks requiring available hardware
 or Windows permissions. This AMD laptop also cannot supply the separate Intel,
 NVIDIA and ARM64 hardware evidence required by the broader validation plan.
@@ -722,3 +724,73 @@ correct mapping lifetime through memory, device and context destruction. The
 existing Vulkan 1.3 device-buffer requirements dispatch also needs to apply the
 same creation-info transformation as actual buffer creation. Camera capture and
 the other previously listed feature/acceptance gates remain open.
+
+### Active rollback and Unicode shortcut correction
+
+The active rollback of `r12 baseline 世界` completed. Before first boot, the
+active disk SHA256 was exactly the snapshot hash
+`f00885b1c334c2ced5087d6a735359b5b6558683c40cd84b68046bb4bafb953f`.
+The retained disk SHA256 exactly matched the pre-rollback hash
+`763b49f02584da4d6878b92dbfd798105182f3f1f7dc53c608fc354f6ded699d`.
+Retained data is under
+`Move 世界/TryOmarchy/.snapshot-rollback-bfece49d03232a236788356d7c5cbef0/data`.
+The rolled-back guest booted (ID `8a3c7cf6-9c02-4529-8d5e-5d634bfb34c7`),
+the post-snapshot marker was absent, both permanent fixture hashes matched,
+and Hyprland was running. The screenshot shows its idle screensaver. The guest
+cleanly powered down at 14:43:49. No Windows host restart was used.
+Evidence: r12-rollback-disk-hashes.json, r12-rollback-guest.txt,
+r12-rollback-desktop.png and r12-rollback-shell.log.
+
+The completion dialog reported a recovery-shortcut failure. This reproduced
+with WScript.Shell's TargetPath setter on existing Unicode paths; an ASCII
+candidate path passed. The implementation now uses IShellLinkW and IPersistFile
+for shortcut creation and reads ownership through the Unicode interface before
+move or uninstall. It also fixes the normal installation and Settings paths.
+Regression tests verify Unicode target/arguments/directory, moved ownership and
+preservation of another installation's shortcut. The two actual retained-state
+links were repaired and their metadata verified without copying a VM or
+replacing its launcher. Evidence: r12-snapshot-rollback-result.png,
+r12-rollback-shortcut-repair.txt and unicode-shortcut-regression.txt.
+
+The focused Windows group passed 91 tests with one skipped. Its first run had
+one transient Access denied failure opening the move fixture's disk; that test
+passed in isolation and the complete focused group passed on retry. Both runs
+are retained in unicode-shortcut-focused-tests*.jsonl. Windows vet with the
+repository's required `-unsafeptr=false` setting passed; unrestricted vet reports
+the pre-existing Win32/COM pointer-contract diagnostics.
+
+### Runtime r13 native verification
+
+Runtime build 34777622186 completed successfully. Both runtime and corresponding
+source archives passed runtime-build/verify.py. SHA256:
+
+- Runtime: `80197a8739052408a88a5ba0d147405aadd84e42fd7cfbe6dea6ed2dd3b6bf9d`.
+- Source: `d193e526b7c1156141f8a72e4a33cfb706325045910232818a145eb7484be179`.
+
+The actual r13 renderer DLL passes the previously failing native regression:
+two section views, 65,536 verified bytes, no invalid CRT callbacks, correct stale
+token rejection, and ordinary file mappings preserved. Evidence:
+venus-native-handles-after.json. This closes the handle bug, not the AMD Vulkan
+memory-type incompatibility. Public release pins remain unchanged.
+
+A short guest smoke used the newly built shortcut-corrected launcher
+(SHA256 `39f76eceb9c65b7c61d078f103dff940f00e2879c33022013f15cf8d573252dd`)
+and explicit user-managed runtime-r13, against the existing rolled-back guest.
+The launcher retains the isolated combined-r12-guest19 manifest; no release
+manifest was repinned. QEMU PID 15900 ran from runtime-r13/bin, boot ID
+`fc6a10c5-de25-415d-ae6a-137b489aeb00`, GPU accelerated on attempt 1.
+Default mpv Vulkan again failed at approximately 1% playback with
+VK_ERROR_OUT_OF_HOST_MEMORY. Its timeout requested exit but teardown hung;
+the specific test player was killed. The guest remained responsive. Explicit
+OpenGL then played the complete 15-second fixture and exited 0; both permanent
+fixture hashes remained correct. Logs: r13-default-video.log,
+r13-default-video-console.txt, r13-opengl-video.log and
+r13-opengl-video-console.txt. This confirms that the r13 handle fix does not
+resolve the remaining Vulkan allocation path. No fallback preference was saved.
+
+Release decision remains **NO-GO for the full-feature scope**. Active rollback
+is now proven and the Unicode shortcut bug is fixed. The remaining work is
+implementation and focused acceptance: AMD Vulkan memory sharing, camera
+capture, the previously listed missing full-feature paths, portable lifecycle
+and hardware-specific gates. Repeating endurance or creating more VM copies
+will not close those implementation blockers.

@@ -3,9 +3,7 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -71,63 +69,33 @@ func createLauncherShortcuts(target, dir string, startMenu, desktop bool) error 
 	if !startMenu && !desktop {
 		return nil
 	}
-	const script = `$ErrorActionPreference='Stop'; ` +
-		`$shell=New-Object -ComObject WScript.Shell; ` +
-		`function Add-TryOmarchyShortcut([string]$path,[string]$arguments,[string]$description) { ` +
-		`$shortcut=$shell.CreateShortcut($path); ` +
-		`$shortcut.TargetPath=$env:TRYOMARCHY_SHORTCUT_TARGET; ` +
-		`$shortcut.Arguments=$arguments; ` +
-		`$shortcut.WorkingDirectory=$env:TRYOMARCHY_SHORTCUT_WORKDIR; ` +
-		`$shortcut.IconLocation=$env:TRYOMARCHY_SHORTCUT_TARGET+',0'; ` +
-		`$shortcut.Description=$description; $shortcut.Save() }; ` +
-		`if ($env:TRYOMARCHY_SHORTCUT_START -eq '1') { ` +
-		`Add-TryOmarchyShortcut (Join-Path ([Environment]::GetFolderPath('Programs')) 'Try Omarchy.lnk') $env:TRYOMARCHY_SHORTCUT_ARGS 'Run Omarchy on Windows'; ` +
-		`Add-TryOmarchyShortcut (Join-Path ([Environment]::GetFolderPath('Programs')) 'Try Omarchy Settings.lnk') $env:TRYOMARCHY_SETTINGS_ARGS 'Configure Try Omarchy' }; ` +
-		`if ($env:TRYOMARCHY_SHORTCUT_DESKTOP -eq '1') { ` +
-		`Add-TryOmarchyShortcut (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Try Omarchy.lnk') $env:TRYOMARCHY_SHORTCUT_ARGS 'Run Omarchy on Windows' }`
-	cmd := exec.Command(system32("WindowsPowerShell\\v1.0\\powershell.exe"),
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
-	cmd.Env = append(os.Environ(),
-		"TRYOMARCHY_SHORTCUT_TARGET="+target,
-		"TRYOMARCHY_SHORTCUT_ARGS="+shortcutArguments(dir),
-		"TRYOMARCHY_SETTINGS_ARGS="+settingsShortcutArguments(dir),
-		"TRYOMARCHY_SHORTCUT_WORKDIR="+dir,
-		fmt.Sprintf("TRYOMARCHY_SHORTCUT_START=%d", boolInt(startMenu)),
-		fmt.Sprintf("TRYOMARCHY_SHORTCUT_DESKTOP=%d", boolInt(desktop)),
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("creating shortcuts: %w: %s", err, strings.TrimSpace(string(output)))
+	paths, err := launcherShortcutPaths()
+	if err != nil {
+		return err
+	}
+	for i, path := range paths {
+		if i < 2 && !startMenu || i == 2 && !desktop {
+			continue
+		}
+		args := shortcutArguments(dir)
+		if i == 1 {
+			args = settingsShortcutArguments(dir)
+		}
+		if err := writeShellLink(path, target, args, dir); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func ensureSettingsShortcutForExistingInstall(target, dir string) error {
-	const script = `$ErrorActionPreference='Stop'; ` +
-		`$programs=[Environment]::GetFolderPath('Programs'); ` +
-		`$launcher=Join-Path $programs 'Try Omarchy.lnk'; ` +
-		`if (Test-Path -LiteralPath $launcher) { ` +
-		`$shell=New-Object -ComObject WScript.Shell; ` +
-		`$existing=$shell.CreateShortcut($launcher); ` +
-		`if ([StringComparer]::OrdinalIgnoreCase.Equals($existing.TargetPath,$env:TRYOMARCHY_SHORTCUT_TARGET)) { ` +
-		`$shortcut=$shell.CreateShortcut((Join-Path $programs 'Try Omarchy Settings.lnk')); ` +
-		`$shortcut.TargetPath=$env:TRYOMARCHY_SHORTCUT_TARGET; ` +
-		`$shortcut.Arguments=$env:TRYOMARCHY_SETTINGS_ARGS; ` +
-		`$shortcut.WorkingDirectory=$env:TRYOMARCHY_SHORTCUT_WORKDIR; ` +
-		`$shortcut.IconLocation=$env:TRYOMARCHY_SHORTCUT_TARGET+',0'; ` +
-		`$shortcut.Description='Configure Try Omarchy'; $shortcut.Save() } }`
-	cmd := exec.Command(system32("WindowsPowerShell\\v1.0\\powershell.exe"),
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
-	cmd.Env = append(os.Environ(),
-		"TRYOMARCHY_SHORTCUT_TARGET="+target,
-		"TRYOMARCHY_SETTINGS_ARGS="+settingsShortcutArguments(dir),
-		"TRYOMARCHY_SHORTCUT_WORKDIR="+dir,
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("creating settings shortcut: %w: %s", err, strings.TrimSpace(string(output)))
+	paths, err := launcherShortcutPaths()
+	if err != nil {
+		return err
 	}
-	return nil
+	return changeOwnedShortcuts(paths[:1], []string{target}, func(_, _ string) error {
+		return writeShellLink(paths[1], target, settingsShortcutArguments(dir), dir)
+	})
 }
 
 func boolInt(value bool) int {

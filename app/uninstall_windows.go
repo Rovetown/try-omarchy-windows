@@ -105,19 +105,11 @@ func regSetDword(key syscall.Handle, name string, value uint32) error {
 // removeLauncherShortcuts deletes the Start menu and Desktop shortcuts that
 // point at this installation's launcher and leaves any other install's alone.
 func removeLauncherShortcuts(target string) error {
-	const script = `$ErrorActionPreference='Stop'; $shell=New-Object -ComObject WScript.Shell; ` +
-		`$programs=[Environment]::GetFolderPath('Programs'); $desktop=[Environment]::GetFolderPath('DesktopDirectory'); ` +
-		`foreach($path in @((Join-Path $programs 'Try Omarchy.lnk'),(Join-Path $programs 'Try Omarchy Settings.lnk'),(Join-Path $desktop 'Try Omarchy.lnk'))) { ` +
-		`if (Test-Path -LiteralPath $path) { $link=$shell.CreateShortcut($path); ` +
-		`if ([StringComparer]::OrdinalIgnoreCase.Equals($link.TargetPath,$env:TRYOMARCHY_SHORTCUT_TARGET)) { Remove-Item -LiteralPath $path -Force } } }`
-	cmd := exec.Command(system32("WindowsPowerShell\\v1.0\\powershell.exe"),
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
-	cmd.Env = append(os.Environ(), "TRYOMARCHY_SHORTCUT_TARGET="+target)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("removing shortcuts: %w: %s", err, strings.TrimSpace(string(output)))
+	paths, err := launcherShortcutPaths()
+	if err != nil {
+		return err
 	}
-	return nil
+	return changeOwnedShortcuts(paths, []string{target}, func(path, _ string) error { return os.Remove(path) })
 }
 
 // runUninstall removes a stopped standard installation: an optional backup

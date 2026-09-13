@@ -7,10 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"syscall"
 	"time"
 )
 
@@ -178,15 +175,19 @@ func createRestoredLaunchers(dir string) error {
 	if err != nil {
 		return err
 	}
-	const script = `$ErrorActionPreference='Stop'; $shell=New-Object -ComObject WScript.Shell; ` +
-		`$items=@(@('Start Omarchy.lnk',$env:TRYOMARCHY_RESTORE_ARGS),@('Settings.lnk',($env:TRYOMARCHY_RESTORE_ARGS+' -settings'))); ` +
-		`foreach($item in $items){$path=Join-Path $env:TRYOMARCHY_RESTORE_DIR $item[0]; if(Test-Path -LiteralPath $path){throw 'Shortcut already exists'}; ` +
-		`$link=$shell.CreateShortcut($path); $link.TargetPath=$env:TRYOMARCHY_RESTORE_TARGET; $link.Arguments=$item[1]; $link.WorkingDirectory=$env:TRYOMARCHY_RESTORE_DIR; $link.IconLocation=$env:TRYOMARCHY_RESTORE_TARGET+',0'; $link.Save()}`
-	cmd := exec.Command(system32("WindowsPowerShell\\v1.0\\powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "TRYOMARCHY_RESTORE_DIR="+dir, "TRYOMARCHY_RESTORE_TARGET="+target, "TRYOMARCHY_RESTORE_ARGS="+shortcutArguments(dir))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("creating restored shortcuts: %w: %s", err, strings.TrimSpace(string(output)))
+	for _, item := range []struct{ name, arguments string }{
+		{"Start Omarchy.lnk", shortcutArguments(dir)},
+		{"Settings.lnk", settingsShortcutArguments(dir)},
+	} {
+		path := filepath.Join(dir, item.name)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("shortcut already exists: %s", path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := writeShellLink(path, target, item.arguments, dir); err != nil {
+			return err
+		}
 	}
 	return recordShortcutOffer(dir)
 }
