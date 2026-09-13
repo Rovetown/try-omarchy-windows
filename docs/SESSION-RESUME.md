@@ -1,5 +1,10 @@
 # Resume here
 
+Physical Windows continuation on September 13, 2026 is recorded in
+[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md).
+Read that report first for laptop paths, current fixes, test evidence and the
+remaining live Windows acceptance work. The sections below retain the prior lab handoff.
+
 Updated September 12, 2026, after the native file-transfer and recovery round.
 
 ## Checkout and current state

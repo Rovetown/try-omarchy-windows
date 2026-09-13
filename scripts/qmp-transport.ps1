@@ -14,7 +14,8 @@ public class OmarchyUnixEndPoint : EndPoint {
  public override SocketAddress Serialize(){
   byte[] bytes=Encoding.UTF8.GetBytes(path);
   if(bytes.Length>103)throw new ArgumentException("Private control path is too long");
-  var address=new SocketAddress(AddressFamily.Unix,bytes.Length+3);
+  // Winsock's async connection path expects the complete sockaddr_un buffer.
+  var address=new SocketAddress(AddressFamily.Unix,110);
   for(int i=0;i<bytes.Length;i++)address[i+2]=bytes[i];
   return address;
  }
@@ -38,7 +39,13 @@ public class OmarchyUnixEndPoint : EndPoint {
   var socket=new Socket(AddressFamily.Unix,SocketType.Stream,ProtocolType.Unspecified);
   try {
    var pending=socket.BeginConnect(new OmarchyUnixEndPoint(path),null,null);
-   using(pending.AsyncWaitHandle){if(!pending.AsyncWaitHandle.WaitOne(timeout))throw new TimeoutException("Private control connection timed out");}
+   // Completed async results can share a wait handle on modern .NET. Do not
+   // dispose that shared handle between successive private connections.
+   var clock=System.Diagnostics.Stopwatch.StartNew();
+   while(!pending.IsCompleted){
+    if(clock.ElapsedMilliseconds>=timeout)throw new TimeoutException("Private control connection timed out");
+    System.Threading.Thread.Sleep(10);
+   }
    socket.EndConnect(pending);
    return socket;
   }catch{socket.Close();throw;}

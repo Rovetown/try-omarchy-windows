@@ -90,6 +90,19 @@ func startSavedSessionTestQEMU(t *testing.T, extra ...string) (*qmpClient, conte
 			t.Skip("QEMU unavailable")
 		}
 	}
+	// Keep fixture IPC out of the real installation's control directory. Its
+	// ACL may differ from this test process, and a concurrent launcher must not
+	// share the fixture's socket namespace. Use a short path for AF_UNIX.
+	ipcDir, err := os.MkdirTemp(os.TempDir(), "tom-ram-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousControlDirectory := qmpControlDirectory
+	qmpControlDirectory = func() (string, error) { return ipcDir, nil }
+	t.Cleanup(func() {
+		qmpControlDirectory = previousControlDirectory
+		os.RemoveAll(ipcDir)
+	})
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
