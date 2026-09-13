@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Create portable copies of normal installations directly as verified QCOW2
+  disks, budgeting nonzero blocks instead of staging a backup and raw restore.
+- Retry transient Windows file locks during move and snapshot publication.
+
 ## v0.0.18-preview - 2026-09-13
 
 - Publish the tested Windows preview, including the previously unpublished

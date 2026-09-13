@@ -9,7 +9,7 @@ import (
 )
 
 // createPortableCopy publishes a complete independent installation only after
-// its disk conversion and archive verification succeed. The source is retained.
+// its disk conversion and content verification succeed. The source is retained.
 func createPortableCopy(dir, destination, launcher string, report backupProgress) error {
 	tool := "qemu-img"
 	if runtime.GOOS == "windows" {
@@ -56,19 +56,12 @@ func createPortableCopyUsingTool(dir, destination, launcher, tool string, report
 		return err
 	}
 	defer os.RemoveAll(stage)
-	archive := filepath.Join(stage, "source.zip")
-	if err := writeVMBackupProgress(dir, archive, report); err != nil {
-		return err
-	}
 	bundle := filepath.Join(stage, "bundle")
 	if err := os.Mkdir(bundle, 0700); err != nil {
 		return err
 	}
 	data := filepath.Join(bundle, "data")
-	if err := restoreVMBackupProgress(archive, data, report); err != nil {
-		return err
-	}
-	if err := makeRestoredDiskPortable(data, tool, report); err != nil {
+	if err := stagePortableData(dir, data, stage, tool, report); err != nil {
 		return err
 	}
 	if err := copyLauncher(launcher, filepath.Join(bundle, stableLauncherName), os.Rename); err != nil {
@@ -92,7 +85,7 @@ func createPortableCopyUsingTool(dir, destination, launcher, tool string, report
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		return fmt.Errorf("portable destination appeared during copying")
 	}
-	return os.Rename(bundle, destination)
+	return renamePortableFileWithRetry(bundle, destination)
 }
 
 func makeRestoredDiskPortable(data, tool string, report backupProgress) error {

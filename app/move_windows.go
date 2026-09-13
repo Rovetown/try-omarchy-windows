@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -51,8 +53,33 @@ func rejectMoveLink(path string, info os.FileInfo) error {
 	return rejectMoveStreams(path)
 }
 
-func publishMoveFile(from, to string) error      { return replaceLauncher(from, to) }
-func publishMoveDirectory(from, to string) error { return replaceLauncher(from, to) }
+func publishMoveFile(from, to string) error      { return publishWindowsMove(from, to) }
+func publishMoveDirectory(from, to string) error { return publishWindowsMove(from, to) }
+
+// Scanners can briefly deny a rename after a verified file has been closed.
+// Retry only Windows sharing/locking/access errors, with a fixed upper bound.
+// Publication also serves rollback recovery: it must remain usable after setup
+// cancellation so the journal can restore a bootable installation.
+func publishWindowsMove(from, to string) error {
+	return publishWindowsMoveWith(from, to, replaceLauncher, time.Sleep)
+}
+
+func publishWindowsMoveWith(from, to string, rename func(string, string) error, pause func(time.Duration)) error {
+	var err error
+	for attempt := 0; attempt < 15; attempt++ {
+		err = rename(from, to)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, syscall.Errno(5)) && !errors.Is(err, syscall.Errno(32)) && !errors.Is(err, syscall.Errno(33)) {
+			break
+		}
+		if attempt < 14 {
+			pause(200 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("publishing %s as %s: %w", from, to, err)
+}
 
 // Resolve before first-run selection or any maintenance action, including
 // explicit -dir and update helpers. Settings can read but cannot recover a move

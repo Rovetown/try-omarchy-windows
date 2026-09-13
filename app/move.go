@@ -193,6 +193,10 @@ func moveExcluded(name string) bool {
 // Count nonzero 64 KiB regions to budget conservatively for both NTFS and ReFS
 // allocation units. This avoids charging a mostly empty sparse disk's capacity.
 func inventoryMove(source string, disk *os.File, report backupProgress) ([]moveFile, int64, error) {
+	return inventoryMoveFiltered(source, disk, report, func(name string) bool { return !moveExcluded(name) })
+}
+
+func inventoryMoveFiltered(source string, disk *os.File, report backupProgress, include func(string) bool) ([]moveFile, int64, error) {
 	var files []moveFile
 	var required int64 = diskSpaceReserve
 	err := filepath.WalkDir(source, func(path string, d os.DirEntry, walkErr error) error {
@@ -206,7 +210,7 @@ func inventoryMove(source string, disk *os.File, report backupProgress) ([]moveF
 		if err != nil {
 			return err
 		}
-		if moveExcluded(name) {
+		if !include(name) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
