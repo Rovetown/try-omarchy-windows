@@ -10,6 +10,16 @@ r12 is installed and its three-output DPMS checks pass. Its one-hour endurance
 run is in progress. Default Vulkan playback still fails on this AMD host.
 The dated sections below retain prior failures and superseded intermediate states.
 
+Open release gates include the AMD Vulkan playback failure, camera usability,
+full snapshot and portable lifecycle acceptance, physical keyboard/focus and
+monitor checks, and host sleep/network/device checks requiring available hardware
+or Windows permissions. This AMD laptop also cannot supply the separate Intel,
+NVIDIA and ARM64 hardware evidence required by the broader validation plan.
+The full-feature document additionally retains implementation requirements for
+production accelerated saved sessions, direct application drop placement,
+a camera bridge, bridged networking and the ARM64 runtime/guest delivery path.
+Automated fixture passes do not close those implementation requirements.
+
 ## Candidate and evidence
 
 - Repository: `omacom/try-omarchy-windows`, branch `codex/full-feature-completion`.
@@ -538,3 +548,46 @@ buffer/image handle compatibility, mapping ownership and synchronization across
 the renderer and QEMU. The probe follows the Vulkan
 [host-pointer import contract](https://docs.vulkan.org/refpages/latest/refpages/source/VkImportMemoryHostPointerInfoEXT.html)
 and [pointer memory-type query](https://docs.vulkan.org/refpages/latest/refpages/source/vkGetMemoryHostPointerPropertiesEXT.html).
+
+After the user reported logging in, native desktop control resumed and the
+unlocked primary desktop rendered correctly. The earlier 12-second input probe
+left little capture time after Windows tool startup; an extended 45-second probe
+was therefore run before drawing a conclusion. It captured native mouse button
+events and the control QMP `b` key events, but not the desktop tool's injected
+`a` key. This is recorded as an automation limitation, not a proven physical
+keyboard defect. User-reported login is separate from full shortcut/focus testing.
+Evidence: r12-native-key-events-long.json and r12-unlocked-primary.jpg.
+
+The first r12 OpenGL video attempt failed because the restored copy lacked the
+earlier video fixture; no video played in that attempt. A new 15-second 720p30
+test pattern was generated (SHA256
+5594b658a7d6c8f723e083a14b63da60fb8bccf3133773bea3aab3f0f6bab97e).
+The five-minute retest uses explicit OpenGL with audio disabled and a monotonic
+CPU sampler. During playback, the same mpv window moved from guest display 2 to
+3 to 1; native screenshots confirm video rendering on every output. This is not
+a Vulkan playback pass. Final playback and endurance results are recorded when
+their respective monitors finish.
+
+An independent eight-second quiet tone during the r12 session passed guest
+PipeWire playback and host QEMU audio-session verification. Render activity
+transitioned active/inactive with peak 0.00268815; capture remained inactive.
+Evidence: r12-audio-guest.txt and audio-r12-tone.json. No microphone audio was
+recorded in this check.
+
+The r12 OpenGL video retest completed normally at 317.7 seconds with exit code
+0. Its 60 five-second CPU samples averaged 14.2079% host CPU (maximum 16.5549%).
+The first post-playback endurance sample covering an idle minute was below 1%.
+The separate five-minute post-video idle sampler remains pending at this point.
+
+The real Backup command refused while the guest was running, reporting the
+active lifecycle port. No destination ZIP was created and the same QEMU PID
+remained running. Evidence: r12-running-backup-refusal-visible.jpg and
+r12-running-backup-state.json. The earlier screenshot without the `-visible`
+suffix captured an occluded surface and is not visual dialog evidence.
+
+The guest virtual NIC was deliberately disconnected for three seconds and
+reconnected through QMP; SSH recovered with the same guest boot identity and
+outbound HTTPS returned 200. This does not test host adapter changes or LAN
+firewall behavior. Windows Central Standard Time/en-US mapped to guest
+America/Chicago/en_US.UTF-8 with US keyboard configuration. Evidence:
+r12-guest-link-recovery.json and r12-host-locale-integration.json.
