@@ -134,7 +134,12 @@ func TestUnicodeShortcutOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := changeOwnedShortcuts(paths, []string{old, next}, func(path, args string) error { return writeShellLink(path, next, args, filepath.Dir(next)) }); err != nil {
+	initialTarget, initialArgs, initialErr := readShellLink(paths[0])
+	changed := false
+	if err := changeOwnedShortcuts(paths, []string{old, next}, func(path, args string) error {
+		changed = true
+		return writeShellLink(path, next, args, filepath.Dir(next))
+	}); err != nil {
 		t.Fatal(err)
 	}
 	target, args, err := readShellLink(paths[0])
@@ -142,7 +147,7 @@ func TestUnicodeShortcutOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	if target != next || args != "-settings" {
-		t.Fatalf("moved link = %q %q", target, args)
+		t.Fatalf("moved link = %q %q; initial=%q %q err=%v; expected old=%q; callback=%v", target, args, initialTarget, initialArgs, initialErr, old, changed)
 	}
 	after, err := os.ReadFile(paths[1])
 	if err != nil {
