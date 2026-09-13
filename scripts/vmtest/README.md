@@ -116,3 +116,30 @@ that neither clipboard was replaced. The separate opt-in
 `TestNativeQEMUFileDropEvent` performs the actual Windows OLE mouse drag into
 SDL. Run that with `TRYOMARCHY_NATIVE_DROP_TEST=1` and `QEMU_SYSTEM` pointing to
 the matching runtime, without other UI tests or manual pointer activity.
+
+## Native Windows Vulkan memory diagnostics
+
+These small host-side probes investigate a guest Venus allocation failure without
+changing the guest, driver or player preferences. Run with native Windows Python
+and the `vulkan==1.3.275.1` Python package. An isolated dependency directory can
+be supplied instead of installing into the Python environment:
+
+```powershell
+python -m pip install --target C:\acceptance-deps vulkan==1.3.275.1
+python scripts\vmtest\windows-vulkan-memory.py --vulkan-python-path C:\acceptance-deps
+python scripts\vmtest\windows-vulkan-host-import.py --vulkan-python-path C:\acceptance-deps
+```
+
+The first prints the buffer memory-type masks with ordinary and OPAQUE_WIN32
+allocations. On the September 13 AMD laptop, the external-buffer mask is `0x1`,
+with no host-visible memory type, whereas the ordinary buffer has mask `0xf`.
+The current runtime forces external buffers, explaining the observed guest
+staging-buffer allocation failure. This diagnostic reports capabilities; an exit
+code of zero alone is not a guest Vulkan pass.
+
+The second imports aligned host memory, binds it to a Vulkan buffer, fills it
+on the GPU, synchronizes host access, and checks all 64 KiB on CPU read. It passed
+on that laptop, identifying a possible implementation direction. It does not
+implement or validate a Venus/QEMU sharing path. Devices lacking the extension
+are explicitly reported as skipped, not passed. Keep the JSON output with the
+host driver identity and integrated guest playback results.
