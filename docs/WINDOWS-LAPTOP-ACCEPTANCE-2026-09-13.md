@@ -944,3 +944,24 @@ No additional VM disk was created. The AMD playback blocker is closed on this
 hardware with these exact artifacts; camera, portable lifecycle, the outstanding
 full-feature implementations and hardware-specific gates remain unproven/open.
 This is not an all-features release approval.
+
+## v0.0.18-preview release preparation
+
+After reviewing the remaining work, the user explicitly authorized publishing
+the improvements as the latest preview and asked for release notes thanking
+external contributors. Full-feature completion remains follow-up work.
+
+The release reuses the exact runtime and guest payloads tested above, avoiding
+a rebuild that would change the accepted artifacts. All ten upload files were
+rehashed successfully. The release manifest normalizes the runtime's checksum
+separator to two spaces (required by the source-pin validator); payload bytes
+are unchanged. Its SHA256 is
+`023908807e48848c972462c10dc01a31193e240140d466e72699953cd27c3346`.
+The source pin and runtime lock now identify v0.0.18-preview.
+
+Version resources were regenerated locally using `go-winres v0.3.3` with icon
+resource ID 1 and the version fields read from `app/versioninfo.rc`, because the
+laptop has no LLVM resource tools. Input JSON is retained as
+`release18-resource.json` in the acceptance directory. The existing resource
+tests validate both compiled numeric versions and both text versions.
+The signed-package smoke and publication are recorded in the next checkpoint.

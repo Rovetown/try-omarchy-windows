@@ -1,5 +1,13 @@
 # Resume here
 
+Current release decision (September 13, after the laptop acceptance): the user
+explicitly requested publishing **v0.0.18-preview as the latest preview**, with
+proper release notes and external contributor acknowledgments. Ship the tested
+improvements now and continue the remaining full-feature work afterward. This
+supersedes the earlier instruction below against an intermediate preview.
+Release preparation pins the exact tested r15 runtime and compatibility-20 guest;
+the signed-package smoke and protected publish workflow remain the final gates.
+
 Physical Windows continuation on September 13, 2026 is recorded in
 [WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md).
 Read that report first for laptop paths, current fixes, test evidence and the

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.0.18-preview - 2026-09-13
+
+- Publish the tested Windows preview, including the previously unpublished
+  v0.0.15–17 improvements below.
+- Add snapshots, verified rollback, native file-transfer windows, and stronger
+  move, restore, clipboard, and disk-reclaim recovery.
+- Ship the tested r15 runtime and compatibility-20 guest with Vulkan video,
+  multiple-display, Unicode-path, shortcut, and guest-session fixes.
+- Record physical Windows acceptance and explicitly retain webcam capture,
+  accelerated saved sessions, portable lifecycle, and broader hardware coverage
+  as remaining preview work.
+- Thank external contributors and community reporters in the
+  [full release notes](.github/release-notes/v0.0.18-preview.md).
+
 ## v0.0.17-preview
 
 - Add file and folder copy/paste between Windows and Omarchy, with bounded
