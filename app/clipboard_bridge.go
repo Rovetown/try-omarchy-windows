@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -28,8 +31,15 @@ type clipBridge struct {
 	// sequence reports the Windows clipboard sequence number when available,
 	// so an unchanged clipboard (which may hold a large image) is not read
 	// and converted on every poll.
-	sequence     func() uint32
-	lastSequence uint32
+	sequence         func() uint32
+	lastSequence     uint32
+	transfers        *fileTransferService
+	transferEnabled  bool
+	outgoingTransfer string
+	showTransfer     func(*transferProgress)
+	transferError    func(error)
+	getPaths         func() ([]string, bool)
+	setPaths         func([]string) bool
 }
 
 func (b *clipBridge) acceptPush(l net.Listener) {
@@ -55,6 +65,10 @@ func (b *clipBridge) acceptPush(l net.Listener) {
 			if err != nil || !strings.HasSuffix(line, "\n") {
 				return
 			}
+			if strings.HasPrefix(line, "files-offer:") && b.transfers != nil {
+				b.receiveClipboardTransfer(c, line)
+				return
+			}
 			item, ok := decodeClipFrame(line)
 			if !ok {
 				return
@@ -70,7 +84,11 @@ func (b *clipBridge) acceptPull(l net.Listener) {
 		if err != nil {
 			return
 		}
+		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		hello, _ := bufio.NewReader(io.LimitReader(c, 64)).ReadString('\n')
+		c.SetReadDeadline(time.Time{})
 		b.mu.Lock()
+		b.transferEnabled = hello == "transfer-v1\n" && b.transfers != nil
 		if b.pullConn != nil {
 			b.pullConn.Close()
 		}
@@ -109,7 +127,38 @@ func (b *clipBridge) sendCurrentHost(conn net.Conn) {
 	if b.sequence != nil {
 		b.lastSequence = b.sequence()
 	}
-	cur, ok := b.getHost()
+	if b.outgoingTransfer != "" {
+		b.transfers.Cancel(b.outgoingTransfer)
+		b.outgoingTransfer = ""
+	}
+	var cur clipItem
+	var ok bool
+	if b.transferEnabled && b.getPaths != nil {
+		if paths, files := b.getPaths(); files {
+			progress := b.progress("Preparing files for Omarchy")
+			ticket, err := b.transfers.Offer(progress.ctx, paths, progress.report)
+			if err != nil {
+				progress.finish()
+				logf("clipboard transfer: %v", err)
+				if b.transferError != nil && !errors.Is(err, context.Canceled) {
+					go b.transferError(err)
+				}
+				return
+			}
+			if b.sequence != nil && b.sequence() != b.lastSequence {
+				b.transfers.Cancel(ticket.ID)
+				progress.finish()
+				return
+			}
+			b.outgoingTransfer = ticket.ID
+			go monitorClipboardTransfer(progress, b.transfers, ticket.ID)
+			data, _ := json.Marshal(ticket)
+			cur, ok = clipItem{Kind: clipTransfer, Data: data}, true
+		}
+	}
+	if !ok {
+		cur, ok = b.getHost()
+	}
 	if !ok || !b.state.shouldSendHost(cur) {
 		return
 	}

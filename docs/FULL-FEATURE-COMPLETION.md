@@ -369,3 +369,34 @@ its payload identities until the first successful guest boot, preventing an
 immediate update before the restored state is usable. Explicit release overrides
 remain available. Tests verify offline manifest/receipt matching, changed
 manifest rejection, command quoting and failed-boot retries.
+
+### Clipboard streaming integration
+
+The launcher now starts the transfer service on reserved loopback port 4452.
+Updated guests negotiate streaming support on the clipboard connection; older
+pull clients keep the original text, image and bounded-file protocol. Windows
+file selections become verified download tickets. Guest file selections request
+an upload ticket for a launcher-chosen private cache, then publish the Windows
+file clipboard only after verified completion. Pasting chooses the final folder
+through the receiving desktop's normal file manager.
+
+Long host-side transfers show a native progress window with Cancel. Changing the
+Windows clipboard during preparation or incoming transfer prevents the obsolete
+selection from being delivered. Guest echo suppression tracks file identities
+and metadata, so edits and directory changes can be copied again. Transferred
+files remain copies, including source selections made with Cut.
+
+Guest patch 0061 connects the streaming clients to both clipboard directions.
+The clean guest patch stack passes 99 contract tests. A Go/Python round trip
+exceeds the old clipboard frame size and verifies received paths, contents and
+echo suppression. Native Windows tests exercise large CF_HDROP selections and
+the progress window's updates and cancellation. Linux race tests and Windows
+vet pass. Drag-and-drop event adapters are the next integration with this same
+service; the clipboard tests do not count as drag-and-drop acceptance.
+
+The final interactive Windows run passed 335 tests with runtime r6 and no
+failures. Four Python interop tests run on Linux; the firewall lifecycle test
+retains its separate opt-in. Test executable SHA256:
+`7fc26b6671a9e2b2bb686453f49312a2b7ccde2ac21614ba95f1c3a93ca05d86`.
+AMD64 test compilation, Windows vet and the ARM64 launcher build passed. The
+new helpers still need the combined guest-image and physical acceptance round.

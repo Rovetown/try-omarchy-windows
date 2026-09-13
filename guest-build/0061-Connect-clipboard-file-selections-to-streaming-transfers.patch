@@ -1,0 +1,270 @@
+From b9871e0836752d24fe96f9b328990af25025be56 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 20:27:09 -0400
+Subject: [PATCH] Connect clipboard file selections to streaming transfers
+
+---
+ .../usr/local/bin/clipboard-bridge            |  14 +-
+ .../usr/local/bin/file-transfer               | 120 +++++++++++++++++-
+ guest/tests/test_clipboard_files.py           |   1 +
+ guest/tests/test_file_transfer.py             |  24 ++++
+ 4 files changed, 156 insertions(+), 3 deletions(-)
+
+diff --git a/guest/factory-overlay/usr/local/bin/clipboard-bridge b/guest/factory-overlay/usr/local/bin/clipboard-bridge
+index 5c0bf38..3a8600d 100755
+--- a/guest/factory-overlay/usr/local/bin/clipboard-bridge
++++ b/guest/factory-overlay/usr/local/bin/clipboard-bridge
+@@ -18,7 +18,7 @@ mkdir -p "$STATE"
+ # wl-paste supplies the selected text on stdin. Keeping it in a file preserves
+ # trailing newlines and avoids a second clipboard read after the selection moves.
+ case "${1:-}" in
+---push|--receive|--push-image|--receive-image|--push-files|--receive-files)
++--push|--receive|--push-image|--receive-image|--push-files|--receive-files|--receive-transfer)
+   # URI selections belong to the file watcher, never the text bridge.
+   if [ "$1" = --push ] && wl-paste --list-types 2>/dev/null | grep -Eq '^(text/uri-list|x-special/gnome-copied-files)$'; then exit 0; fi
+   kind=text
+@@ -36,7 +36,15 @@ case "${1:-}" in
+   # overwrite the state of a newer host value received while it was sending.
+   exec 9> "$STATE/lock"
+   flock -x 9 || exit 1
++  if [ "$1" = --receive-transfer ]; then
++    file-transfer clipboard-receive --state "$STATE" < "$outgoing" || exit 1
++    exit 0
++  fi
+   if [ "$1" = --push-files ]; then
++    file-transfer clipboard-send --state "$STATE" < "$outgoing"
++    result=$?
++    [ "$result" -eq 0 ] && exit 0
++    [ "$result" -eq 3 ] || exit "$result"
+     clipboard-files pack < "$outgoing" > "$outgoing.zip" || { rm -f "$outgoing.zip"; exit 1; }
+     mv "$outgoing.zip" "$outgoing" || exit 1
+   fi
+@@ -54,6 +62,7 @@ case "${1:-}" in
+       fi
+       sha256sum < "$outgoing.zip" | cut -d' ' -f1 > "$STATE/last_content"
+       rm -f "$outgoing.zip"
++      file-transfer clipboard-mark --state "$STATE" < "$outgoing.uris" || exit 1
+       wl-copy --type text/uri-list < "$outgoing.uris" 9>&-
+       result=$?
+       if [ "$result" -ne 0 ]; then clipboard-files discard < "$outgoing.uris" || true; fi
+@@ -132,12 +141,13 @@ while :; do
+     while :; do
+       # Keep socat directly connected to read. An extra pipe stage buffers
+       # small clipboard payloads and makes ordinary text appear stuck.
+-      socat -u TCP:$HOST:$PULL_PORT,connect-timeout=3 - 2>/dev/null | while IFS= read -r line; do
++      file-transfer clipboard-pull 2>/dev/null | while IFS= read -r line; do
+         line=${line%"$(printf '\r')"}
+         receive=--receive
+         case $line in
+         png:*) receive=--receive-image; line=${line#png:} ;;
+         files:*) receive=--receive-files; line=${line#files:} ;;
++        transfer:*) receive=--receive-transfer; line=${line#transfer:} ;;
+         esac
+         printf '%s' "$line" | base64 -d > "$STATE/incoming" 2>/dev/null || continue
+         "$0" $receive < "$STATE/incoming" || break
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer b/guest/factory-overlay/usr/local/bin/file-transfer
+index 259c076..eb9dcd3 100755
+--- a/guest/factory-overlay/usr/local/bin/file-transfer
++++ b/guest/factory-overlay/usr/local/bin/file-transfer
+@@ -1,6 +1,9 @@
+ #!/usr/bin/env python3
+ """Stream verified file selections for clipboard and drag-and-drop adapters."""
+ import argparse
++import base64
++import socket
++import subprocess
+ import ctypes
+ import datetime
+ import hashlib
+@@ -8,6 +11,7 @@ import http.client
+ import importlib.machinery
+ import importlib.util
+ import json
++import itertools
+ import os
+ from pathlib import Path
+ import shutil
+@@ -261,6 +265,95 @@ def upload(ticket, archive, host='10.0.2.2', port=4452):
+             connection.close()
+ 
+ 
++def clipboard_selection_key(paths):
++    digest = hashlib.sha256()
++    count = 0
++    def visit(path):
++        nonlocal count
++        plain_path(path)
++        info = path.stat(follow_symlinks=False)
++        count += 1
++        if count > ENTRIES:
++            raise ValueError('Too many files in the clipboard selection')
++        digest.update(json.dumps([str(path), info.st_dev, info.st_ino,
++                                  info.st_size, info.st_mtime_ns, info.st_ctime_ns,
++                                  info.st_mode]).encode())
++        if path.is_dir():
++            children = list(itertools.islice(path.iterdir(), ENTRIES - count + 1))
++            if len(children) > ENTRIES - count:
++                raise ValueError('Too many files in the clipboard selection')
++            for child in sorted(children):
++                visit(child)
++    for path in paths:
++        visit(path)
++    return digest.hexdigest()
++
++
++def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
++    cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'try-omarchy-transfers'
++    plain_path(cache)
++    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
++    destination = cache / ('received-' + os.urandom(16).hex())
++    result = download(ticket, destination, host, port)
++    paths = [Path(path) for path in result['paths']]
++    # Caller holds the bridge lock. Record before wl-copy wakes the watchers.
++    marker = state / 'last_file_selection'
++    marker.write_text(clipboard_selection_key(paths))
++    try:
++        subprocess.run(['wl-copy', '--type', 'text/uri-list'],
++                       input=('\r\n'.join(path.as_uri() for path in paths) + '\r\n').encode(),
++                       check=True, close_fds=True)
++    except BaseException:
++        marker.unlink(missing_ok=True)
++        raise
++    return result
++
++
++def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448):
++    paths = files.uri_paths(data, ENTRIES)
++    key = clipboard_selection_key(paths)
++    marker = state / 'last_file_selection'
++    if marker.exists() and marker.read_text() == key:
++        return {'state': 'unchanged'}
++    with tempfile.TemporaryDirectory(prefix='transfer-', dir=state) as temporary:
++        archive = Path(temporary) / 'selection.zip'
++        offer = pack(paths, archive)
++        with socket.create_connection((host, push_port), timeout=10) as control:
++            control.settimeout(7200)
++            control.sendall(b'files-offer:' + base64.b64encode(json.dumps(offer).encode()) + b'\n')
++            stream = control.makefile('rb')
++            with stream:
++                line = stream.readline(4097)
++                if not line:
++                    raise NotImplementedError('The host uses the legacy file clipboard')
++                if len(line) > 4096 or not line.endswith(b'\n'):
++                    raise ValueError('Invalid clipboard transfer response')
++                ticket = json.loads(line)
++                if not valid_ticket(ticket, 'upload') or ticket['offer'] != offer:
++                    raise ValueError('Clipboard transfer offer changed')
++                upload(ticket, archive, host, port)
++                control.sendall(b'complete\n')
++                if stream.readline(64) != b'complete\n':
++                    raise ValueError('Clipboard changed before file delivery; copy again')
++    marker.write_text(key)
++    return {'state': 'completed'}
++
++
++def clipboard_pull(host='10.0.2.2', port=4449):
++    with socket.create_connection((host, port), timeout=10) as connection:
++        connection.settimeout(None)
++        connection.sendall(b'transfer-v1\n')
++        with connection.makefile('rb') as stream:
++            while True:
++                line = stream.readline(24 << 20)
++                if not line:
++                    return
++                if not line.endswith(b'\n'):
++                    raise ValueError('Clipboard frame exceeds its limit')
++                sys.stdout.buffer.write(line)
++                sys.stdout.buffer.flush()
++
++
+ def main():
+     parser = argparse.ArgumentParser()
+     sub = parser.add_subparsers(dest='command', required=True)
+@@ -276,7 +369,27 @@ def main():
+         client.add_argument('--host', default='10.0.2.2')
+         client.add_argument('--port', default=4452, type=int)
+         client.add_argument('--destination' if name == 'download' else '--archive', required=True, type=Path)
++    for name in ('clipboard-send', 'clipboard-receive', 'clipboard-pull', 'clipboard-mark'):
++        client = sub.add_parser(name)
++        client.add_argument('--state', type=Path)
+     args = parser.parse_args()
++    if args.command == 'clipboard-pull':
++        clipboard_pull()
++        return
++    if args.command in ('clipboard-send', 'clipboard-receive', 'clipboard-mark'):
++        if args.state is None:
++            raise ValueError('Clipboard state directory is required')
++        plain_path(args.state)
++        data = sys.stdin.buffer.read((1 << 20) + 1)
++        if len(data) > 1 << 20:
++            raise ValueError('Clipboard selection exceeds its limit')
++        if args.command == 'clipboard-mark':
++            (args.state / 'last_file_selection').write_text(clipboard_selection_key(files.uri_paths(data, ENTRIES)))
++        elif args.command == 'clipboard-send':
++            clipboard_send(data, args.state)
++        else:
++            clipboard_receive(json.loads(data), args.state)
++        return
+     if args.command == 'pack':
+         result = pack(args.paths, args.archive)
+     elif args.command == 'receive':
+@@ -296,6 +409,11 @@ if __name__ == '__main__':
+     signal.signal(signal.SIGTERM, interrupt)
+     try:
+         main()
+-    except (ValueError, OSError, http.client.HTTPException, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
++    except NotImplementedError as error:
++        print(str(error), file=sys.stderr)
++        sys.exit(3)
++    except (subprocess.CalledProcessError, ValueError, OSError, http.client.HTTPException, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
+         print(f'File transfer: {error or "cancelled"}', file=sys.stderr)
++        if len(sys.argv) > 1 and sys.argv[1] in ('clipboard-send', 'clipboard-receive') and shutil.which('notify-send'):
++            subprocess.run(['notify-send', 'File copy did not finish', str(error or 'Transfer cancelled')], check=False, timeout=5)
+         sys.exit(1)
+diff --git a/guest/tests/test_clipboard_files.py b/guest/tests/test_clipboard_files.py
+index 942ade5..f1149a8 100644
+--- a/guest/tests/test_clipboard_files.py
++++ b/guest/tests/test_clipboard_files.py
+@@ -65,6 +65,7 @@ class FileClipboardTests(unittest.TestCase):
+         with tempfile.TemporaryDirectory() as tmp:
+             root=Path(tmp); bindir=root/'bin';bindir.mkdir()
+             (bindir/'clipboard-files').symlink_to(HELPER)
++            (bindir/'file-transfer').symlink_to(HELPER.with_name('file-transfer'))
+             capture=root/'clipboard'
+             copy=bindir/'wl-copy';copy.write_text('#!/bin/sh\ncat > "$CAPTURE"\n');copy.chmod(0o755)
+             source=root/'source';source.write_text('hello')
+diff --git a/guest/tests/test_file_transfer.py b/guest/tests/test_file_transfer.py
+index 6073f64..1825db4 100644
+--- a/guest/tests/test_file_transfer.py
++++ b/guest/tests/test_file_transfer.py
+@@ -149,3 +149,27 @@ class StreamingFileTests(unittest.TestCase):
+             finally:
+                 server.shutdown()
+                 worker.join()
++
++    def test_clipboard_selection_tracks_edits_and_directory_changes(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            source = root / 'source'
++            source.mkdir()
++            child = source / 'file'
++            child.write_text('original')
++            first = transfer.clipboard_selection_key([source])
++            self.assertEqual(first, transfer.clipboard_selection_key([source]))
++            child.write_text('updated contents')
++            second = transfer.clipboard_selection_key([source])
++            self.assertNotEqual(first, second)
++            (source / 'new').write_text('new file')
++            self.assertNotEqual(second, transfer.clipboard_selection_key([source]))
++
++    def test_clipboard_selection_rejects_linked_sources(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            root = Path(tmp)
++            source = root / 'source'
++            source.mkdir()
++            (source / 'link').symlink_to(root / 'outside')
++            with self.assertRaises(ValueError):
++                transfer.clipboard_selection_key([source])
+-- 
+2.55.0
+

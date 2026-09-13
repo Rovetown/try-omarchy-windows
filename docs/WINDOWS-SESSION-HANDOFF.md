@@ -21,6 +21,14 @@ The correctness review and final 330-test Windows run are recorded in
 [PR-110-REVIEW.md](PR-110-REVIEW.md). The opt-in firewall lifecycle test passed
 separately.
 
+The clipboard streaming integration now has a 335-test Windows run with r6,
+including native file clipboard and progress/cancellation checks. Guest patch
+0061 wires the transfer clients into the clipboard bridge; the clean guest
+contract has 99 tests. The final test binary in the nested lab is
+`D:\TryOmarchyFullFeaturesTest\streaming-clipboard.test.exe`, SHA256
+`7fc26b6671a9e2b2bb686453f49312a2b7ccde2ac21614ba95f1c3a93ca05d86`.
+Its log is `D:\TryOmarchyFullFeaturesTest\streaming-suite.txt`.
+
 Guest source now includes the streaming helper at compatibility revision 19.
 When rerunning smoke checks against the signed v17 baseline, pass
 `--compat-revision 18` explicitly.

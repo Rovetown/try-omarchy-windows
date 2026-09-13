@@ -270,7 +270,20 @@ func (s *fileTransferService) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}()
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("ETag", `"`+offer.SHA256+`"`)
-		http.ServeContent(w, r, "files.zip", time.Time{}, io.NewSectionReader(file, 0, offer.ArchiveBytes))
+		reader := &transferDownloadReader{ReadSeeker: io.NewSectionReader(file, 0, offer.ArchiveBytes), progress: func(n int64) {
+			s.mu.Lock()
+			job.status = fileTransferStatus{State: "transferring", Bytes: n, Total: offer.ArchiveBytes, Phase: "Sending files"}
+			s.mu.Unlock()
+		}}
+		http.ServeContent(w, r, "files.zip", time.Time{}, reader)
+		s.mu.Lock()
+		if r.Method == "GET" && r.Header.Get("Range") == "" && reader.bytes == offer.ArchiveBytes {
+			job.status.State = "sent"
+			job.status.Phase = "Files sent"
+		} else if job.activeDownloads == 1 {
+			job.status.State = "ready"
+		}
+		s.mu.Unlock()
 		return
 	}
 	if r.Method == "GET" {
@@ -380,4 +393,20 @@ func (s *fileTransferService) Serve(listener net.Listener) error {
 		return nil
 	}
 	return err
+}
+
+// ServeContent retains seek/range support while reporting bytes read for delivery.
+type transferDownloadReader struct {
+	io.ReadSeeker
+	bytes    int64
+	progress func(int64)
+}
+
+func (r *transferDownloadReader) Read(data []byte) (int, error) {
+	n, err := r.ReadSeeker.Read(data)
+	r.bytes += int64(n)
+	if n > 0 {
+		r.progress(r.bytes)
+	}
+	return n, err
 }
