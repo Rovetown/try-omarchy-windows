@@ -40,7 +40,14 @@ def main():
     ssh = ["sshpass", "-e", "ssh", "-T", "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR", "-p", os.environ.get("TRYOMARCHY_VM_SSH_PORT", "2222")]
     host = os.environ.get("TRYOMARCHY_VM_SSH_HOST", "bts@127.0.0.1")
     invoke = [host, "powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand"]
-    command = "& " + quote(executable) + " " + " ".join(map(quote, arguments))
+    # Windows PowerShell's legacy native argument binding strips the quotes in
+    # JSON device arguments. Supply the complete Windows command line directly.
+    command = ("$info=New-Object System.Diagnostics.ProcessStartInfo; "
+               "$info.FileName=" + quote(executable) + "; "
+               "$info.Arguments=" + quote(subprocess.list2cmdline(arguments)) + "; "
+               "$info.UseShellExecute=$false; "
+               "$child=[System.Diagnostics.Process]::Start($info); "
+               "$child.WaitForExit(); exit $child.ExitCode")
     process = subprocess.Popen(ssh + ["-o", "ExitOnForwardFailure=yes", "-L", f"127.0.0.1:{port}:127.0.0.1:{port}"] + invoke + [encoded(command)], stdin=subprocess.DEVNULL, stdout=sys.stderr)
     connection = None
     def terminate(_signum, _frame):

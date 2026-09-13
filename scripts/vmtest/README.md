@@ -86,3 +86,33 @@ and poweroff, a second launch that downloads only `SHA256SUMS`, disk growth,
 a fresh install through the location picker, and the forced rollback (kill
 the launcher after "QMP connected" and before "userspace announced ready",
 then relaunch and confirm no download and the previous payload).
+
+## Complete guest file-transfer round trip
+
+Run `TestGuestDesktopFileTransferRoundTrip` alone in the interactive Windows
+session with `TRYOMARCHY_GUEST_TRANSFER_TEST=1`. It owns ports 4448, 4449 and
+4452, so stop the launcher first. Run the matching Linux smoke command against
+the same Windows machine with `--displays 1 --file-transfer-round-trip`.
+`windows-qemu-stdio.py` supplies the Windows QEMU serial transport; its module
+docstring lists the required environment variables.
+
+Use an expanded disposable disk, as a normal installation does. For example,
+create a new QCOW2 overlay with the candidate's Windows `qemu-img.exe`:
+
+```powershell
+qemu-img.exe create -f qcow2 -F raw -b D:\candidate\rootfs.ext4 D:\candidate\transfer-test.qcow2 20G
+```
+
+Then add `--disk-image /local/candidate/transfer-test.qcow2 --disk-format qcow2`
+to the smoke command. The serial wrapper maps the local candidate prefix to
+`TRYOMARCHY_WINDOWS_GUEST`. The smoke also uses QEMU's temporary snapshot mode,
+so the factory image and supplied overlay remain intact. The compact factory
+image alone has insufficient user space for the transfer service's 1 GiB
+reserve; a failure there does not represent an installed VM.
+
+The fixture sends 31 MiB files with Unicode names in both directions, verifies
+bytes and original files, checks the guest's native transfer window, and asserts
+that neither clipboard was replaced. The separate opt-in
+`TestNativeQEMUFileDropEvent` performs the actual Windows OLE mouse drag into
+SDL. Run that with `TRYOMARCHY_NATIVE_DROP_TEST=1` and `QEMU_SYSTEM` pointing to
+the matching runtime, without other UI tests or manual pointer activity.

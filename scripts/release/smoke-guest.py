@@ -99,7 +99,12 @@ def main() -> None:
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm", help="use TCG for nested Windows runtime testing")
     parser.add_argument("--login-delay", type=float, help="wait for provisioning before the first serial login; TCG defaults to 60 seconds")
     parser.add_argument("--compat-revision", type=int, default=19, help="expected guest compatibility revision; use 18 for the signed v17 baseline")
+    parser.add_argument("--disk-image", type=Path, help="disposable test disk, for example an expanded QCOW2 overlay of the factory image")
+    parser.add_argument("--disk-format", choices=("raw", "qcow2"), default="raw")
+    parser.add_argument("--file-transfer-round-trip", action="store_true", help="exercise native Windows bridge file drops with the opt-in Windows test process")
     args = parser.parse_args()
+    if args.file_transfer_round_trip and (not args.displays or args.compat_revision < 19):
+        parser.error("file transfer round trip requires a graphical compatibility-19 guest")
     if not 1 <= args.compat_revision <= 999999:
         parser.error("compatibility revision is invalid")
     FACT_CHECKS["compat-version"] = f'test "$(cat /usr/share/try-omarchy/compat-version)" = "{args.compat_revision}:$(uname -r)" && echo yes || echo no'
@@ -137,6 +142,75 @@ def main() -> None:
             "count=$(hyprctl -i \"$instance\" monitors -j 2>/dev/null | jq length 2>/dev/null); "
             f"test \"$count\" = {args.displays} && break; sleep 1; done; echo ${{count:-0}}")
         EXPECTED_FACTS["guest-displays"] = str(args.displays)
+        if args.compat_revision >= 19 and not args.file_transfer_round_trip:
+            FACT_CHECKS["transfer-window-visible"] = """export XDG_RUNTIME_DIR=/run/user/$(id -u);
+instance=$(hyprctl -j instances | jq -r '.[0].instance // empty');
+export HYPRLAND_INSTANCE_SIGNATURE="$instance";
+export WAYLAND_DISPLAY=$(hyprctl -j instances | jq -r '.[0].wl_socket // empty');
+export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus;
+file-transfer-window >/tmp/tryomarchy-transfer-window.log 2>&1 & transfer_pid=$!;
+result=no;
+for attempt in $(seq 1 15); do
+  if hyprctl clients -j 2>/dev/null | jq -e 'any(.[]; .class == "org.omarchy.FileTransfers")' >/dev/null 2>&1; then result=yes; break; fi;
+  sleep 1;
+done;
+kill "$transfer_pid" 2>/dev/null || true;
+wait "$transfer_pid" 2>/dev/null || true;
+test "$result" = yes || cat /tmp/tryomarchy-transfer-window.log >&2;
+echo "$result"
+"""
+            EXPECTED_FACTS["transfer-window-visible"] = "yes"
+
+
+    if args.file_transfer_round_trip:
+        transfer_check = r"""import hashlib, json, os, shutil, subprocess, sys, tempfile, time
+from pathlib import Path
+instance = json.loads(subprocess.check_output(['hyprctl', '-j', 'instances']))[0]
+os.environ['HYPRLAND_INSTANCE_SIGNATURE'] = instance['instance']
+os.environ['WAYLAND_DISPLAY'] = instance['wl_socket']
+os.environ['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=' + os.environ['XDG_RUNTIME_DIR'] + '/bus'
+expected = b'Try Omarchy verified file drop\n' * (1 << 20)
+digest = hashlib.sha256(expected).hexdigest()
+cache = Path.home() / '.cache/try-omarchy-transfers'
+assert shutil.disk_usage(Path.home()).free >= len(expected) * 2 + (1 << 30), 'Transfer smoke needs an expanded test disk with at least 1 GiB reserve'
+deadline = time.monotonic() + 180
+received = None
+while time.monotonic() < deadline:
+    for path in cache.glob('received-*/from-windows-世界.txt'):
+        if hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+            received = path
+            break
+    if received:
+        break
+    time.sleep(.25)
+if not received:
+    print(subprocess.getoutput('df -h ~'), file=sys.stderr, flush=True)
+    print(subprocess.getoutput('journalctl --user -b --no-pager -n 100'), file=sys.stderr, flush=True)
+    print(subprocess.getoutput('find ~/.cache/try-omarchy-transfers /run/user/$(id -u)/try-omarchy-clipboard -maxdepth 2 -type f'), file=sys.stderr, flush=True)
+assert received, 'Windows file did not arrive intact'
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    clients = json.loads(subprocess.check_output(['hyprctl', 'clients', '-j']))
+    if any(client['class'] == 'org.omarchy.FileTransfers' for client in clients):
+        break
+    time.sleep(.25)
+else:
+    raise AssertionError('guest transfer window is missing: ' + repr(clients))
+assert subprocess.check_output(['wl-paste', '--no-newline']) == b'clipboard stays here', 'file drop replaced the guest clipboard'
+with tempfile.TemporaryDirectory(prefix='tryomarchy-drag-') as temporary:
+    source = Path(temporary) / 'from-omarchy-世界.txt'
+    source.write_bytes(expected)
+    subprocess.run(['file-transfer', 'drop-send', '--state', os.environ['XDG_RUNTIME_DIR'] + '/try-omarchy-clipboard'], input=(source.as_uri() + '\n').encode(), stdout=subprocess.PIPE, check=True, timeout=180)
+    assert source.read_bytes() == expected, 'guest original changed'
+assert received.read_bytes() == expected, 'received file changed'
+print('yes')
+"""
+        encoded_transfer = base64.b64encode(transfer_check.encode()).decode()
+        FACT_CHECKS["file-transfer-round-trip"] = ("export XDG_RUNTIME_DIR=/run/user/$(id -u); "
+            f"printf %s {encoded_transfer} | base64 -d >/tmp/tryomarchy-transfer-check.py; "
+            "python /tmp/tryomarchy-transfer-check.py")
+        EXPECTED_FACTS["file-transfer-round-trip"] = "yes"
+
 
     command = [
         "qemu-system-x86_64",
@@ -160,7 +234,7 @@ def main() -> None:
         "-serial",
         "stdio",
         "-drive",
-        f"file={args.artifacts / 'rootfs.ext4'},format=raw,if=virtio",
+        f"file={args.disk_image or args.artifacts / 'rootfs.ext4'},format={args.disk_format},if=virtio",
         "-kernel",
         str(args.artifacts / "vmlinuz-linux"),
         "-initrd",
