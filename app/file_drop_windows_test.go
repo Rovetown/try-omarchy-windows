@@ -3,8 +3,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"syscall"
@@ -110,4 +113,94 @@ func TestNativeFileDropWindow(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("file transfer window did not close")
 	}
+}
+
+// This uses the real Windows OLE source and SDL destination. It requires an
+// isolated interactive test desktop because it moves the pointer briefly.
+func TestNativeQEMUFileDropEvent(t *testing.T) {
+	if os.Getenv("TRYOMARCHY_NATIVE_DROP_TEST") != "1" {
+		t.Skip("isolated Windows desktop and runtime r7 required")
+	}
+	tool := os.Getenv("QEMU_SYSTEM")
+	if tool == "" {
+		t.Fatal("QEMU_SYSTEM required")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	ole := syscall.NewLazyDLL("ole32.dll")
+	hr, _, _ := ole.NewProc("OleInitialize").Call(0)
+	if int32(hr) < 0 {
+		t.Fatal("OLE initialization failed")
+	}
+	defer ole.NewProc("OleUninitialize").Call()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	listener.Close()
+	cmd := exec.Command(tool, "-machine", "q35,accel=tcg", "-m", "64", "-S", "-nodefaults", "-device", "VGA", "-display", "sdl,gl=off", "-qmp", "tcp:"+address+",server=on,wait=off")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cmd.Process.Kill(); cmd.Wait(); qemuPid.Store(0); qemuHwnd.Store(0); enumTitlePid = 0 }()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var c *qmpClient
+	for ctx.Err() == nil {
+		c, err = dialQMPClient(ctx, address)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	dir := t.TempDir()
+	qemuPid.Store(uint32(cmd.Process.Pid))
+	for qemuHwnd.Load() == 0 && ctx.Err() == nil {
+		enforceDisplayWindows(qemuPid.Load(), dir, false, 0)
+		time.Sleep(50 * time.Millisecond)
+	}
+	hwnd := qemuHwnd.Load()
+	if hwnd == 0 {
+		t.Fatal("SDL display did not open")
+	}
+	procSetForegroundWindow.Call(hwnd)
+	path := filepath.Join(dir, "dropped 世界.txt")
+	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var rect [4]int32
+	user32.NewProc("GetWindowRect").Call(hwnd, uintptr(unsafe.Pointer(&rect[0])))
+	mouse := user32.NewProc("mouse_event")
+	cursor := user32.NewProc("SetCursorPos")
+	defer mouse.Call(4, 0, 0, 0, 0)
+	cursor.Call(uintptr(rect[0]+20), uintptr(rect[1]+20))
+	mouse.Call(2, 0, 0, 0, 0)
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		time.Sleep(300 * time.Millisecond)
+		cursor.Call(uintptr((rect[0]+rect[2])/2), uintptr((rect[1]+rect[3])/2))
+		time.Sleep(500 * time.Millisecond)
+		mouse.Call(4, 0, 0, 0, 0)
+	}()
+	if err := dragHostFiles(0, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	<-released
+	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for c.lines.Scan() {
+		paths, ok := droppedFilesEvent(c.lines.Text())
+		if ok {
+			if len(paths) != 1 || paths[0] != path {
+				t.Fatal("native drop changed paths", paths)
+			}
+			return
+		}
+	}
+	t.Fatal("native OLE drop did not reach the SDL QMP event", c.lines.Err())
 }
