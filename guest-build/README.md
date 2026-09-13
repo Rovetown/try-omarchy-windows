@@ -18,6 +18,17 @@ What the patches change (the original graphics path was proven on hardware
 2026-08-28; later additions are covered by contract, release-smoke, and nested
 Windows VM tests unless noted in the release checklist):
 
+- Compatibility revision 20 carries Venus presentation workarounds into both
+  the UWSM desktop and login shells, including persistent-disk upgrades.
+  `VN_PERF=no_async_present` avoids the Mesa 26.2.2 acquisition/presentation lock
+  deadlock reproduced on the Windows AMD renderer. The supported loader option
+  `VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING=1` keeps driver code available for
+  thread-exit callbacks after instance destruction. Mappings remain until process
+  exit; Vulkan device resources are still explicitly destroyed. Additional Venus
+  flags and explicit loader overrides are preserved. Remove these workarounds
+  only after default Vulkan playback and thread teardown pass with an upstream
+  correction. See the Windows laptop acceptance report for the failure traces.
+
 - Omarchy pin bumped to the v4.0.3 release tag, staged runtime stamped 4.0.3
   (upstream's `version` file lags its tags)
 - Omarchy repository packages must be signed, as in upstream 4.0.2; the builder
