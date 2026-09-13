@@ -45,7 +45,10 @@ int main(int argc, char **argv) {
  if(type==memory.memoryTypeCount)return 1;
  VkMemoryAllocateInfo mai={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,.allocationSize=requirements.size,.memoryTypeIndex=type};
  VkDeviceMemory allocation; CHECK(vkAllocateMemory(device,&mai,NULL,&allocation));
- CHECK(vkBindBufferMemory(device,buffer,allocation,0));
+ if(argc>3){
+  VkBindBufferMemoryInfo bind={.sType=VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_INFO,.buffer=buffer,.memory=allocation};
+  CHECK(vkBindBufferMemory2(device,1,&bind));
+ }else CHECK(vkBindBufferMemory(device,buffer,allocation,0));
  void *mapped; CHECK(vkMapMemory(device,allocation,0,VK_WHOLE_SIZE,0,&mapped));
  memset(mapped,0x5a,65536);
  VkImage image=VK_NULL_HANDLE;VkDeviceMemory image_memory=VK_NULL_HANDLE;
@@ -62,9 +65,21 @@ int main(int argc, char **argv) {
   vkGetDeviceImageMemoryRequirements(device,&imr,&imr2);
   printf("image type masks: image=%x device-query=%x\n",image_req.memoryTypeBits,imr2.memoryRequirements.memoryTypeBits);fflush(stdout);
   if(image_req.memoryTypeBits!=imr2.memoryRequirements.memoryTypeBits || !(image_req.memoryTypeBits&(1u<<type)))return 1;
-  VkMemoryAllocateInfo image_alloc={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,.allocationSize=image_req.size,.memoryTypeIndex=type};
+  uint32_t image_type=type;
+  if(argc>2){
+   image_type=0;
+   while(image_type<memory.memoryTypeCount && (!(image_req.memoryTypeBits&(1u<<image_type)) ||
+    !(memory.memoryTypes[image_type].propertyFlags&VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)))image_type++;
+   if(image_type==memory.memoryTypeCount){puts("FAIL: device-local image memory lost");return 1;}
+  }
+  printf("image memory type: %u\n",image_type);fflush(stdout);
+  VkMemoryDedicatedAllocateInfo dedicated={.sType=VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,.image=image};
+  VkMemoryAllocateInfo image_alloc={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,.pNext=&dedicated,.allocationSize=image_req.size,.memoryTypeIndex=image_type};
   CHECK(vkAllocateMemory(device,&image_alloc,NULL,&image_memory));
-  CHECK(vkBindImageMemory(device,image,image_memory,0));
+  if(argc>3){
+   VkBindImageMemoryInfo bind={.sType=VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO,.image=image,.memory=image_memory};
+   CHECK(vkBindImageMemory2(device,1,&bind));
+  }else CHECK(vkBindImageMemory(device,image,image_memory,0));
  }
  VkCommandPoolCreateInfo pci={.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,.queueFamilyIndex=family};
  VkCommandPool pool;CHECK(vkCreateCommandPool(device,&pci,NULL,&pool));

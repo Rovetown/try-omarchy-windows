@@ -10,7 +10,7 @@ parser.add_argument('source', type=Path)
 args = parser.parse_args()
 source = (args.source / 'src/venus/vkr_device_memory.c').read_text(encoding='utf-8')
 
-def function(name, result):
+def function(name, result, source=source):
     start = source.index('\n' + name + '(') + 1
     brace = source.index('{', start)
     depth, end = 1, brace + 1
@@ -23,13 +23,14 @@ harness = r'''
 #include <windows.h>
 #include <vulkan/vulkan.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #define MAX2(a,b) ((a)>(b)?(a):(b))
 struct vkr_host_memory { struct vkr_host_memory *next; int fd; void *mapping; };
-struct physical { uint64_t min_host_pointer_alignment; };
+struct physical { uint64_t min_host_pointer_alignment; VkPhysicalDeviceMemoryProperties memory_properties; };
 struct vkr_device {
  struct physical *physical_device;
  struct { struct { VkDevice device; } handle; } base;
@@ -58,6 +59,14 @@ harness += function('vkr_host_memory_destroy', 'static void')
 harness += function('vkr_device_memory_release_host_backings', 'void')
 harness += function('vkr_host_memory_create', 'static VkResult')
 harness += r'''
+struct vkr_buffer { struct { struct { VkBuffer buffer; } handle; } base; VkBuffer plain_buffer,host_buffer; };
+struct vkr_image { struct { struct { VkImage image; } handle; } base; VkImage plain_image,host_image; };
+'''
+for kind in ('buffer', 'image'):
+    resource = (args.source / f'src/venus/vkr_{kind}.c').read_text(encoding='utf-8')
+    harness += function(f'vkr_{kind}_merge_requirements', 'static void', resource)
+    harness += function(f'vkr_{kind}_select_host_memory', 'bool', resource)
+harness += r'''
 #define TRACE_FUNC() ((void)0)
 struct vkr_device_memory { struct vkr_device *device; int base; };
 struct vn_dispatch_context { void *data; };
@@ -77,8 +86,27 @@ static void vkr_device_remove_object(void *ctx, struct vkr_device *dev, int *bas
 harness += function('vkr_dispatch_vkFreeMemory', 'static void')
 harness += r'''
 int main(void) {
- struct physical physical={4096};
+ struct physical physical={.min_host_pointer_alignment=4096};
+ physical.memory_properties.memoryTypeCount=4;
+ physical.memory_properties.memoryTypes[0].propertyFlags=1;
+ physical.memory_properties.memoryTypes[1].propertyFlags=6;
+ physical.memory_properties.memoryTypes[2].propertyFlags=7;
+ physical.memory_properties.memoryTypes[3].propertyFlags=14;
  struct vkr_device dev={.physical_device=&physical,.GetMemoryHostPointerPropertiesEXT=properties};
+ VkMemoryRequirements plain={4096,256,15},host_req={8192,4096,10};
+ vkr_buffer_merge_requirements(&dev,&plain,&host_req);
+ assert(plain.size==8192 && plain.alignment==4096 && plain.memoryTypeBits==11);
+ plain=(VkMemoryRequirements){4096,256,15};
+ vkr_image_merge_requirements(&dev,&plain,&host_req);
+ assert(plain.size==8192 && plain.alignment==4096 && plain.memoryTypeBits==11);
+ struct vkr_buffer buffer={.plain_buffer=(VkBuffer)(uintptr_t)1,.host_buffer=(VkBuffer)(uintptr_t)2};
+ assert(vkr_buffer_select_host_memory(&buffer,false) && buffer.base.handle.buffer==buffer.plain_buffer);
+ assert(vkr_buffer_select_host_memory(&buffer,true) && buffer.base.handle.buffer==buffer.host_buffer);
+ struct vkr_image image={.plain_image=(VkImage)(uintptr_t)1,.host_image=(VkImage)(uintptr_t)2};
+ assert(vkr_image_select_host_memory(&image,false) && image.base.handle.image==image.plain_image);
+ assert(vkr_image_select_host_memory(&image,true) && image.base.handle.image==image.host_image);
+ image.host_image=VK_NULL_HANDLE;
+ assert(!vkr_image_select_host_memory(&image,true));
  VkMemoryAllocateFlagsInfo flags={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
  VkMemoryAllocateInfo original={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
   .pNext=&flags,.allocationSize=17,.memoryTypeIndex=1};

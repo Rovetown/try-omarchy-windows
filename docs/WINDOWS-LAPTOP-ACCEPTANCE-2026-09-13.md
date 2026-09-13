@@ -794,3 +794,61 @@ implementation and focused acceptance: AMD Vulkan memory sharing, camera
 capture, the previously listed missing full-feature paths, portable lifecycle
 and hardware-specific gates. Repeating endurance or creating more VM copies
 will not close those implementation blockers.
+
+### Continued Vulkan implementation: r14 and r15 engineering
+
+After the user instructed continued work, r14 implemented pagefile-backed host
+memory import for internal Venus allocations, SHM blob export, matching resource
+requirements, and mapping lifetime through vkFreeMemory/device destruction.
+Renderer-only build 34779634209 passed compilation and the native handle test.
+Its DLL SHA256 is
+`07574f25d22d7f4d0826fe69269cd99fea93c4e82ffcdafc491c159fe9ee010a`.
+For local engineering only, that DLL replaced libvirglrenderer-1.dll in the
+external runtime-r13 extraction. This mixed directory is not a verified r13
+release archive; the original verified r13 ZIP remains intact. No bundled
+installation runtime or public pin changed.
+
+Native GPU tests now pass actual allocation, image clear, image-to-buffer copy,
+and all 65,536 readback bytes for both linear and optimal host-imported images.
+Evidence: venus-host-image-linear.json and venus-host-image-optimal.json.
+The guest-side scripts/vmtest/venus-memory.c also passes through the real
+Virtio-GPU Venus AMD device for buffer fills and optimal image clear/copy,
+including mapping, matching legacy/maintenance4 requirement masks, GPU fence,
+byte verification and complete teardown. Evidence: r14-guest-memory.txt and
+r14-guest-image.txt. These establish the new memory transport, not playback.
+
+Default mpv no longer reports its previous allocation errors with r14, but
+stalls creating its swapchain. A symbolized guest stack identifies
+wsi_select_memory_type(req_props=DEVICE_LOCAL, type_bits=0xa): the all-host
+resource declaration removed all device-local choices. Evidence:
+r14-default-video.log, r14-player-stacks.txt and r14-symbol-stacks.txt.
+The 27 MiB matching Venus debug symbols were fetched to the guest's /tmp,
+with a bounded download; no full debug package or VM copy was created.
+
+The r15 correction keeps ordinary and host-importable native resource variants
+until binding and merges compatible memory requirements without losing
+device-local choices. Dedicated allocation selection and both binding APIs
+select the corresponding native object. Renderer build 34780579812 is pending
+at this checkpoint. Earlier run 34779610100 failed its patch digest because of
+Windows line endings; commit 456c2af corrected the digest before any build.
+Run 34780030447 additionally passes the compiled actual host-allocation helper
+regression, including alignment, handle cleanup, incompatible memory types,
+overflow, independent-view lifetime, and driver-before-backing free order.
+
+r15 renderer build 34780579812 succeeded. Archive SHA256 values:
+renderer-bin.zip `aebd91f5eb0a7a33f2de8bd1f1b74e1e7b32f0e2132ec5315ddebae414f4dd30`;
+renderer-source.zip `209560b592afd808fb1bf5ab42618c51ec549801fec55eb3b8c3123cf337718e`.
+All four guest memory modes pass: host buffer, dedicated host image, dedicated
+device-local image, and BindMemory2. Both requirement APIs return mask 0xb,
+preserving device-local memory. Native DLL handle regression also passes.
+Evidence: r15-guest-memory.txt and r15-native-handles.json.
+
+Default mpv still stalls (bounded test exit 137). The new symbolized trace shows
+an asynchronous Venus presentation/acquisition mutex deadlock, after successful
+swapchain creation. VN_PERF=no_async_present plays the full video but crashes at
+thread teardown after driver unload. Adding the documented Vulkan loader option
+VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING=1 completes all 15 seconds and exits
+0, without preloading libraries or changing the selected Vulkan renderer.
+These are diagnostic environment overrides, not yet packaged guest defaults.
+Evidence: r15-default-video.log, r15-symbol-stacks.txt, r15-sync-crash.txt,
+r15-loader-video-result.txt. Packaging and default-session verification remain.
