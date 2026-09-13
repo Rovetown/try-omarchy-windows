@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('library', type=Path)
@@ -83,6 +84,23 @@ try:
                 failures.append('Stale token was accepted')
             if dll.os_dupfd_cloexec(token) != -1 or dll.os_close_fd(token) != -1:
                 failures.append('Stale token operation was accepted')
+            # The resolver must preserve the existing real-CRT-descriptor path.
+            with tempfile.TemporaryFile() as ordinary:
+                ordinary.write(b'\x3c' * size)
+                ordinary.flush()
+                view = dll.mmap(None, size, 3, 1, ordinary.fileno(), 0)
+                if view in (None, invalid):
+                    failures.append('Ordinary file mapping regressed')
+                else:
+                    try:
+                        if c.string_at(view, size) != b'\x3c' * size:
+                            failures.append('Ordinary mapping bytes differ')
+                    finally:
+                        if dll.munmap(view, size) != 0:
+                            failures.append('Ordinary view cleanup failed')
+                ordinary.seek(0)
+                if ordinary.read(1) != b'\x3c':
+                    failures.append('Mapping closed the borrowed file descriptor')
         finally:
             for view in views:
                 if dll.munmap(view, size) != 0:

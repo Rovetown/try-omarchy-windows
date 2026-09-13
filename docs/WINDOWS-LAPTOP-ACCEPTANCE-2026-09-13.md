@@ -10,8 +10,10 @@ r12 passed three-output GPU/CPU DPMS checks and its one-hour endurance run.
 Shutdown confirmation and forced GPU-to-CPU fallback also pass. Full snapshot
 creation and restore-as-copy now pass, including whole-disk hash verification
 and a real desktop boot. Rollback and portable lifecycle acceptance remain open.
-Default Vulkan playback still fails on this AMD host. Testing is paused at the
-storage gate described in the final section; no guest is running.
+Default Vulkan playback still fails on this AMD host. Targeted renderer engineering
+has resumed; the final section records the r13 handle correction and native
+regressions. The earlier storage pause is historical; recheck current free space
+before recovery operations.
 The dated sections below retain prior failures and superseded intermediate states.
 
 Open release gates include the AMD Vulkan playback failure, camera usability,
