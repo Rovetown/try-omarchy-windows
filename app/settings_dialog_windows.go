@@ -70,6 +70,11 @@ const (
 	settingsMoveID        = 2028
 	settingsMoveCleanupID = 2029
 	settingsHelpID        = 2030
+	settingsSnapshotsID   = 2031
+	settingsPortableID    = 2032
+	settingsDisplaysID    = 2033
+	settingsLANPublicID   = 2034
+	settingsLANAddID      = 2035
 	bsAutoradiobutton     = 0x0009
 	wsGroup               = 0x00020000
 	settingsRecoveryDone  = 0x8010
@@ -125,7 +130,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	var hwnd uintptr
 	var scroll settingsScroll
 	var hFull, hMem, hCPUs, hDisk, hShare, hShareOn, hFwd, hKey uintptr
-	var hRenderAuto, hRenderGPU, hRenderCPU uintptr
+	var hRenderAuto, hRenderGPU, hRenderCPU, hDisplays, hLANPublic uintptr
 
 	text := func(handle uintptr) string {
 		n, _, _ := procSendMessageW.Call(handle, wmGettextlength, 0, 0)
@@ -146,8 +151,24 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		} else if r, _, _ := procSendMessageW.Call(hRenderCPU, bmGetcheck, 0, 0); r == bstChecked {
 			render = renderCPU
 		}
-		return settingsFromForm(checked == bstChecked, shareChecked == bstChecked,
+		s, err := settingsFromForm(checked == bstChecked, shareChecked == bstChecked,
 			text(hMem), text(hCPUs), text(hShare), text(hFwd), text(hKey), render)
+		if err != nil {
+			return s, err
+		}
+		s.Displays, err = strconv.Atoi(strings.TrimSpace(text(hDisplays)))
+		if err != nil || s.Displays < 1 || s.Displays > maximumGuestDisplays {
+			return s, fmt.Errorf("choose 1 to %d guest displays", maximumGuestDisplays)
+		}
+		checkedLAN, _, _ := procSendMessageW.Call(hLANPublic, bmGetcheck, 0, 0)
+		s.LANPublic = checkedLAN == bstChecked
+		s.ForwardAdapters = map[string]string{}
+		for _, forward := range s.Forwards {
+			if adapter := current.ForwardAdapters[forward]; adapter != "" {
+				s.ForwardAdapters[forward] = adapter
+			}
+		}
+		return s, s.validate()
 	}
 	browseFolder := func() {
 		if selected, ok := browseForFolder(hwnd, "Choose the Windows folder to share with Omarchy"); ok {
@@ -162,7 +183,11 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 			errorBox(err.Error())
 			return
 		}
-		cmd := exec.Command(self, "-dir", dataDir, "-recovery", action)
+		args := []string{"-dir", dataDir, "-recovery", action}
+		if portable {
+			args = append(args, "-portable")
+		}
+		cmd := exec.Command(self, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 		if err = cmd.Start(); err != nil {
 			errorBox("Could not open recovery controls:\n\n" + err.Error())
@@ -197,7 +222,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				}
 				s, err := collect()
 				diskGiB := storage.DiskGiB
-				if err == nil && !portable {
+				if err == nil {
 					diskGiB, err = parseDiskGiB(text(hDisk))
 				}
 				if err == nil && s.activeShare() != "" {
@@ -211,7 +236,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				if err == nil {
 					err = saveSettings(path, s)
 				}
-				if err == nil && !portable && diskGiB != storage.DiskGiB {
+				if err == nil && diskGiB != storage.DiskGiB {
 					if storageErr := saveStorageSettings(dataDir, diskGiB); storageErr != nil {
 						errorBox("Other settings were saved, but disk capacity could not be saved:\n\n" + storageErr.Error())
 						return 0
@@ -231,6 +256,36 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 				launchRecovery("move")
 			case settingsMoveCleanupID:
 				launchRecovery("move-cleanup")
+			case settingsLANAddID:
+				value, err := chooseLANForward(hwnd)
+				if err != nil {
+					errorBox(err.Error())
+					break
+				}
+				if value.Forward != "" {
+					lines := append(strings.Fields(text(hFwd)), value.Forward)
+					var forwards forwardList
+					for _, line := range lines {
+						if err = forwards.Set(line); err != nil {
+							break
+						}
+					}
+					if err != nil {
+						errorBox(err.Error())
+					} else {
+						setText(hFwd, strings.Join(lines, "\r\n"))
+						if value.Adapter != "" {
+							if current.ForwardAdapters == nil {
+								current.ForwardAdapters = map[string]string{}
+							}
+							current.ForwardAdapters[value.Forward] = value.Adapter
+						}
+					}
+				}
+			case settingsPortableID:
+				launchRecovery("portable-create")
+			case settingsSnapshotsID:
+				launchRecovery("snapshots")
 			case settingsBackupID:
 				launchRecovery("backup")
 			case settingsRestoreID:
@@ -284,7 +339,7 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		return false
 	}
 
-	const clientW, clientH = 480, 714
+	const clientW, clientH = 480, 780
 	rect := [4]int32{0, 0, clientW, clientH}
 	style := uintptr(wsCaption | wsSysmenu | wsVscroll)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rect[0])), style, 0, 0)
@@ -329,6 +384,10 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		procSendMessageW.Call(hFull, bmSetcheck, bstChecked, 0)
 	}
 	y += 30
+	mk("STATIC", "Guest displays", left, y+3, labelW, 20, ssNoprefix, 0)
+	hDisplays = mk("EDIT", strconv.Itoa(guestDisplayCount(current.Displays)), fieldX, y, 100, 24, wsBorder|wsTabstop|esAutohscroll, settingsDisplaysID)
+	mk("STATIC", "1 to 16 displays", fieldX+112, y+3, fieldW-112, 20, ssNoprefix, 0)
+	y += 34
 	mk("STATIC", "Rendering", left, y+3, labelW, 20, ssNoprefix, 0)
 	hRenderAuto = mk("BUTTON", "Automatic", fieldX, y, 90, 22, bsAutoradiobutton|wsGroup|wsTabstop, settingsRenderAutoID)
 	hRenderGPU = mk("BUTTON", "GPU", fieldX+96, y, 60, 22, bsAutoradiobutton, settingsRenderGPUID)
@@ -354,21 +413,13 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 	y += 34
 	mk("STATIC", "Disk capacity (GiB)", left, y+3, labelW, 20, ssNoprefix, 0)
 	hDisk = mk("EDIT", strconv.Itoa(storage.DiskGiB), fieldX, y, 100, 24, wsBorder|wsTabstop|esAutohscroll, settingsDiskID)
-	if portable {
-		procEnableWindow.Call(hDisk, 0)
-	}
 	y += 28
 	capacityHelp := "0 keeps the default. Increasing grows the disk next launch; lowering never shrinks it. Space is used as files are added."
-	if portable {
-		capacityHelp = "Portable disks keep their existing capacity."
-	}
 	mk("STATIC", capacityHelp, left, y, clientW-2*left, 36, ssNoprefix, 0)
 	y += 38
 	status := ""
-	if !portable {
-		if info, err := os.Stat(filepath.Join(dataDir, "vm", "disk.raw")); err == nil {
-			status = "Current capacity: " + formatGiB(info.Size()) + ". "
-		}
+	if disk, err := inspectInstallationDisk(dataDir); err == nil {
+		status = "Current capacity: " + formatGiB(disk.VirtualBytes) + ". "
 	}
 	if available, err := diskFreeBytes(dataDir); err == nil {
 		status += "Free on Windows drive: " + formatGiB(available) + "."
@@ -388,10 +439,16 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		procSendMessageW.Call(hShareOn, bmSetcheck, bstChecked, 0)
 	}
 	y += 34
-	mk("STATIC", "Port forwards, one per line\n(tcp:2222:22 forwards\n127.0.0.1:2222 to sshd)", left, y+3, labelW, 60, ssNoprefix, 0)
+	mk("STATIC", "Port forwards\nLocal: tcp:2222:22\nLAN: tcp:IP:8080:80", left, y+3, labelW, 60, ssNoprefix, 0)
 	hFwd = mk("EDIT", strings.Join(current.Forwards, "\r\n"), fieldX, y, fieldW, 72,
 		wsBorder|wsTabstop|wsVscroll|esMultiline|esAutovscroll, settingsFwdID)
 	y += 82
+	mk("BUTTON", "Add LAN...", left, y, 120, 26, wsTabstop, settingsLANAddID)
+	hLANPublic = mk("BUTTON", "Allow LAN on public networks", left+130, y, clientW-2*left-130, 22, bsAutocheckbox|wsTabstop, settingsLANPublicID)
+	if current.LANPublic {
+		procSendMessageW.Call(hLANPublic, bmSetcheck, bstChecked, 0)
+	}
+	y += 32
 	mk("STATIC", "SSH public key file\n(blank: your ~/.ssh/id_*.pub)", left, y+3, labelW, 40, ssNoprefix, 0)
 	hKey = mk("EDIT", current.SSHKey, fieldX, y, fieldW, 24, wsBorder|wsTabstop|esAutohscroll, settingsKeyID)
 	// The two-line key label above is 40 px tall from y+3; start the next
@@ -406,22 +463,23 @@ func runSettingsDialog(path, dataDir string, portable bool) (saved bool) {
 		label string
 		id    uintptr
 		x     int32
-	}{{"Back up...", settingsBackupID, left}, {"Restore...", settingsRestoreID, left + 150}, {"Reset guest...", settingsResetID, left + 300}} {
-		button := mk("BUTTON", control.label, control.x, y, 140, 26, wsTabstop, control.id)
-		if portable {
+	}{{"Back up...", settingsBackupID, left}, {"Restore...", settingsRestoreID, left + 112}, {"Snapshots...", settingsSnapshotsID, left + 224}, {"Reset guest...", settingsResetID, left + 336}} {
+		button := mk("BUTTON", control.label, control.x, y, 104, 26, wsTabstop, control.id)
+		if portable && control.id == settingsResetID {
 			procEnableWindow.Call(button, 0)
 		}
 	}
 	y += 30
 	help := "Close Omarchy first. Backups use saved settings. Restore creates a separate copy."
 	if portable {
-		help = "Backup and recovery controls are available for standard installs."
+		help = "Backups and snapshots create independent copies. Close Omarchy first."
 	}
 	mk("STATIC", help, left, y, clientW-2*left, 36, ssNoprefix, 0)
 	y += 42
-	uninstallButton := mk("BUTTON", "Uninstall...", left, y, 140, 26, wsTabstop, settingsUninstallID)
-	moveButton := mk("BUTTON", "Move...", left+150, y, 140, 26, wsTabstop, settingsMoveID)
-	cleanupButton := mk("BUTTON", "Remove previous...", left+300, y, 140, 26, wsTabstop, settingsMoveCleanupID)
+	uninstallButton := mk("BUTTON", "Uninstall...", left, y, 104, 26, wsTabstop, settingsUninstallID)
+	moveButton := mk("BUTTON", "Move...", left+112, y, 104, 26, wsTabstop, settingsMoveID)
+	cleanupButton := mk("BUTTON", "Clean up...", left+224, y, 104, 26, wsTabstop, settingsMoveCleanupID)
+	mk("BUTTON", "Portable copy...", left+336, y, 104, 26, wsTabstop, settingsPortableID)
 	state, stateErr := hostMoveStore().load()
 	if portable {
 		procEnableWindow.Call(uninstallButton, 0)

@@ -27,7 +27,7 @@ fi
 ''')
             for p in bindir.iterdir():
                 p.chmod(0o755)
-            env = dict(os.environ, PATH=f'{bindir}:{os.environ["PATH"]}',
+            env = dict(os.environ, PATH=f'{bindir}{os.pathsep}{os.environ["PATH"]}',
                        GITHUB_REPOSITORY='example/repo', GITHUB_RUN_ID='123',
                        GITHUB_RUN_ATTEMPT='2', GITHUB_STEP_SUMMARY=str(root / 'summary'),
                        CALLS=str(root / 'calls'), REJECT=str(int(reject)), DISPATCH_FAILS=str(int(dispatch_fails)))

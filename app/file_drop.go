@@ -1,0 +1,74 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"time"
+)
+
+var desktopClipboard atomic.Pointer[clipBridge]
+
+func droppedFilesEvent(line string) ([]string, bool) {
+	if len(line) > 1<<20 {
+		return nil, false
+	}
+	var event struct {
+		Event string `json:"event"`
+		Data  struct {
+			Display int      `json:"display"`
+			Files   []string `json:"files"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(line), &event) != nil || event.Event != "DISPLAY_FILE_DROP" || event.Data.Display < 0 || event.Data.Display >= maximumGuestDisplays || len(event.Data.Files) == 0 || len(event.Data.Files) > 1000 {
+		return nil, false
+	}
+	bytes := 0
+	for _, path := range event.Data.Files {
+		bytes += len(path)
+		if !filepath.IsAbs(path) || strings.ContainsRune(path, 0) || bytes > 131072 {
+			return nil, false
+		}
+	}
+	return event.Data.Files, true
+}
+
+func sendDroppedFiles(paths []string) error {
+	b := desktopClipboard.Load()
+	if b == nil {
+		return fmt.Errorf("Omarchy is still starting")
+	}
+	select {
+	case b.dropRequests <- append([]string(nil), paths...):
+		return nil
+	default:
+		return fmt.Errorf("finish another file transfer before dropping more files")
+	}
+}
+
+func (b *clipBridge) offerDroppedFiles(paths []string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pullConn == nil || !b.transferEnabled {
+		return fmt.Errorf("the guest file-transfer service is not connected yet")
+	}
+	progress := b.progress("Preparing dropped files")
+	ticket, err := b.transfers.Offer(progress.ctx, paths, progress.report)
+	if err != nil {
+		progress.finish()
+		return err
+	}
+	data, _ := json.Marshal(ticket)
+	frame := encodeClipFrame(clipItem{Kind: clipDrop, Data: data})
+	b.pullConn.SetWriteDeadline(time.Now().Add(20 * time.Second))
+	n, err := b.pullConn.Write([]byte(frame))
+	if err != nil || n != len(frame) {
+		b.transfers.Cancel(ticket.ID)
+		progress.finish()
+		return fmt.Errorf("the guest disconnected before receiving the dropped files")
+	}
+	go monitorClipboardTransfer(progress, b.transfers, ticket.ID)
+	return nil
+}

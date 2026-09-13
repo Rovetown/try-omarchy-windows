@@ -1,0 +1,123 @@
+From d20aef07f2b465a3b4f26bb3e9b0307b56ce604d Mon Sep 17 00:00:00 2001
+From: Try Omarchy Release <actions@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 15:37:01 -0500
+Subject: [PATCH] Stabilize Venus presentation and driver lifetime on Windows
+
+---
+ .../etc/profile.d/try-omarchy-vulkan.sh       |  1 +
+ .../usr/local/lib/try-omarchy/vulkan-env      | 14 ++++++++++
+ .../share/uwsm/env.d/20-try-omarchy-vulkan    |  1 +
+ guest/scripts/finalize-rootfs.sh              |  5 +++-
+ guest/tests/test_vulkan_env.py                | 26 +++++++++++++++++++
+ guest/tests/verify.py                         |  2 +-
+ 6 files changed, 47 insertions(+), 2 deletions(-)
+ create mode 100644 guest/factory-overlay/etc/profile.d/try-omarchy-vulkan.sh
+ create mode 100644 guest/factory-overlay/usr/local/lib/try-omarchy/vulkan-env
+ create mode 100644 guest/factory-overlay/usr/share/uwsm/env.d/20-try-omarchy-vulkan
+ create mode 100644 guest/tests/test_vulkan_env.py
+
+diff --git a/guest/factory-overlay/etc/profile.d/try-omarchy-vulkan.sh b/guest/factory-overlay/etc/profile.d/try-omarchy-vulkan.sh
+new file mode 100644
+index 0000000..4d5cddc
+--- /dev/null
++++ b/guest/factory-overlay/etc/profile.d/try-omarchy-vulkan.sh
+@@ -0,0 +1 @@
++. /usr/local/lib/try-omarchy/vulkan-env
+diff --git a/guest/factory-overlay/usr/local/lib/try-omarchy/vulkan-env b/guest/factory-overlay/usr/local/lib/try-omarchy/vulkan-env
+new file mode 100644
+index 0000000..7a82b59
+--- /dev/null
++++ b/guest/factory-overlay/usr/local/lib/try-omarchy/vulkan-env
+@@ -0,0 +1,14 @@
++# Mesa 26.2.2 Venus can deadlock between asynchronous presentation and image
++# acquisition on the Windows renderer. Keep presentation synchronous until the
++# upstream locking is corrected. Preserve additional user-selected Venus flags.
++case ",${VN_PERF-}," in
++  *,no_async_present,*) ;;
++  *) VN_PERF="${VN_PERF:+${VN_PERF},}no_async_present" ;;
++esac
++export VN_PERF
++
++# Venus registers thread destructors which can outlive vkDestroyInstance.
++# Keep driver code mapped until process exit so those callbacks remain valid.
++# Use the loader's supported option, without globally preloading a Vulkan ICD.
++: "${VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING:=1}"
++export VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING
+diff --git a/guest/factory-overlay/usr/share/uwsm/env.d/20-try-omarchy-vulkan b/guest/factory-overlay/usr/share/uwsm/env.d/20-try-omarchy-vulkan
+new file mode 100644
+index 0000000..4d5cddc
+--- /dev/null
++++ b/guest/factory-overlay/usr/share/uwsm/env.d/20-try-omarchy-vulkan
+@@ -0,0 +1 @@
++. /usr/local/lib/try-omarchy/vulkan-env
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index 7d50139..1a1e4cd 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -73,6 +73,9 @@ version = subprocess.check_output(["pacman", "-Q", "try-omarchy-runtime"], text=
+ UPDATE_MANIFEST
+ 
+ compat_paths=(
++  usr/local/lib/try-omarchy/vulkan-env
++  usr/share/uwsm/env.d/20-try-omarchy-vulkan
++  etc/profile.d/try-omarchy-vulkan.sh
+   usr/share/try-omarchy/system-owned-paths
+   usr/local/lib/try-omarchy/repair-icon-names
+   usr/local/lib/try-omarchy/repair-system-ownership
+@@ -130,7 +133,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=19
++compat_revision=20
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/tests/test_vulkan_env.py b/guest/tests/test_vulkan_env.py
+new file mode 100644
+index 0000000..31c9aba
+--- /dev/null
++++ b/guest/tests/test_vulkan_env.py
+@@ -0,0 +1,26 @@
++import os
++from pathlib import Path
++import subprocess
++import unittest
++
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'factory-overlay/usr/local/lib/try-omarchy/vulkan-env'
++
++
++class VulkanEnvironmentTests(unittest.TestCase):
++    def environment(self, **values):
++        env = dict(os.environ)
++        for key in ('VN_PERF', 'VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING'):
++            env.pop(key, None)
++        env.update(values)
++        command = '. "$1"; . "$1"; printf "%s\\n%s\\n" "$VN_PERF" "$VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING"'
++        return subprocess.check_output(['sh', '-c', command, 'test', str(SCRIPT)], env=env, text=True).splitlines()
++
++    def test_default_and_repeated_sourcing(self):
++        self.assertEqual(self.environment(), ['no_async_present', '1'])
++
++    def test_preserves_additional_flags_and_explicit_loader_override(self):
++        self.assertEqual(self.environment(VN_PERF='no_tiled_wsi_image', VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING='0'), ['no_tiled_wsi_image,no_async_present', '0'])
++
++    def test_existing_flag_is_not_duplicated(self):
++        self.assertEqual(self.environment(VN_PERF='no_async_present,no_tiled_wsi_image'), ['no_async_present,no_tiled_wsi_image', '1'])
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index ed72f30..cd7fbc0 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=19" in finalize_rootfs
++        "compat_revision=20" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+-- 
+2.54.0.windows.1
+

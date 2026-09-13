@@ -1,0 +1,458 @@
+#!/usr/bin/env python3
+"""Stream verified file selections for clipboard and drag-and-drop adapters."""
+import argparse
+import base64
+import socket
+import subprocess
+import ctypes
+import datetime
+import hashlib
+import http.client
+import importlib.machinery
+import importlib.util
+import json
+import itertools
+import os
+from pathlib import Path
+import shutil
+import signal
+import struct
+import sys
+import tempfile
+import zipfile
+import zlib
+
+loader = importlib.machinery.SourceFileLoader('clipboard_files', str(Path(__file__).with_name('clipboard-files')))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+files = importlib.util.module_from_spec(spec)
+loader.exec_module(files)
+LIMIT = 100 << 30
+ENTRIES = 10000
+RESERVE = 1 << 30
+
+
+def plain_path(path):
+    if not path.is_absolute():
+        raise ValueError('An absolute path is required')
+    for candidate in (path, *path.parents):
+        if candidate.is_symlink():
+            raise ValueError('Linked transfer paths are not supported')
+
+
+class BudgetFile:
+    def __init__(self, file, limit):
+        self.file, self.limit = file, limit
+
+    def write(self, data):
+        if self.file.tell() + len(data) > self.limit:
+            raise ValueError('Transfer exceeds its storage budget')
+        return self.file.write(data)
+
+    def __getattr__(self, name):
+        return getattr(self.file, name)
+
+
+
+def inspect(file):
+    files.validate_directory(file, ENTRIES)
+    return files.inspect_archive(zipfile.ZipFile(file), LIMIT, ENTRIES)
+
+
+def offer_for(file):
+    file.seek(0)
+    with inspect(file) as archive:
+        entries = archive.infolist()
+        count, size = len(entries), sum(entry.file_size for entry in entries)
+    file.seek(0)
+    digest = hashlib.file_digest(file, 'sha256').hexdigest()
+    return {'version': 1, 'archiveBytes': os.fstat(file.fileno()).st_size,
+            'fileBytes': size, 'entries': count, 'sha256': digest}
+
+
+def pack(paths, destination):
+    plain_path(destination)
+    for source in paths:
+        plain_path(source)
+        if destination.is_relative_to(source):
+            raise ValueError('Transfer storage must be outside the selected folders')
+    free = shutil.disk_usage(destination.parent).free
+    if free <= RESERVE:
+        raise ValueError('Not enough free space for this transfer')
+    fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    try:
+        with os.fdopen(fd, 'w+b') as output:
+            uris = ''.join(path.as_uri() + '\n' for path in paths).encode()
+            files.pack_to(uris, BudgetFile(output, min(LIMIT, free - RESERVE)), LIMIT, ENTRIES, preserve_metadata=True)
+            output.flush()
+            os.fsync(output.fileno())
+            return offer_for(output)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def valid_offer(offer):
+    names = {'version', 'archiveBytes', 'fileBytes', 'entries', 'sha256'}
+    if not isinstance(offer, dict) or set(offer) != names:
+        return False
+    if any(type(offer[name]) is not int for name in names - {'sha256'}):
+        return False
+    digest = offer['sha256']
+    return (offer['version'] == 1 and 0 < offer['archiveBytes'] <= LIMIT
+            and 0 <= offer['fileBytes'] <= LIMIT and 0 < offer['entries'] <= ENTRIES
+            and isinstance(digest, str) and len(digest) == 64
+            and all(char in '0123456789abcdef' for char in digest))
+
+
+def modified_time(entry):
+    extra = entry.extra
+    while len(extra) >= 4:
+        kind, length = struct.unpack('<HH', extra[:4])
+        value, extra = extra[4:4 + length], extra[4 + length:]
+        if kind == 0x5455 and len(value) >= 5 and value[0] & 1:
+            return struct.unpack('<I', value[1:5])[0]
+    return datetime.datetime(*entry.date_time, tzinfo=datetime.timezone.utc).timestamp()
+
+
+def publish(source, destination):
+    for root, _, _ in os.walk(source, topdown=False):
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = libc.renameat2
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(destination))
+    fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def receive(input, offer, destination):
+    if not valid_offer(offer):
+        raise ValueError('Invalid file transfer offer')
+    plain_path(destination)
+    if destination.exists():
+        raise ValueError('Choose a new destination folder')
+    if shutil.disk_usage(destination.parent).free < offer['archiveBytes'] + offer['fileBytes'] + RESERVE:
+        raise ValueError('Not enough free space for this transfer')
+    with tempfile.TemporaryDirectory(prefix='.transfer-in-', dir=destination.parent) as temporary:
+        stage = Path(temporary)
+        with (stage / 'incoming.zip').open('x+b') as output:
+            digest = hashlib.sha256()
+            remaining = offer['archiveBytes']
+            while remaining:
+                data = input.read(min(65536, remaining))
+                if not data:
+                    raise ValueError('Transfer ended before all files arrived')
+                remaining -= len(data)
+                output.write(data)
+                digest.update(data)
+            if input.read(1) or digest.hexdigest() != offer['sha256']:
+                raise ValueError('File transfer checksum or length mismatch')
+            output.flush()
+            with inspect(output) as archive:
+                entries = archive.infolist()
+                if len(entries) != offer['entries'] or sum(e.file_size for e in entries) != offer['fileBytes']:
+                    raise ValueError('File transfer inventory changed')
+                contents = stage / 'contents'
+                contents.mkdir(mode=0o700)
+                for entry in entries:
+                    target = contents / entry.filename
+                    if entry.is_dir():
+                        target.mkdir(mode=0o700, parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    mode = 0o600 | ((entry.external_attr >> 16) & 0o100)
+                    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
+                    with os.fdopen(fd, 'wb') as result, archive.open(entry) as data:
+                        remaining = entry.file_size
+                        while chunk := data.read(min(65536, remaining + 1)):
+                            remaining -= len(chunk)
+                            if remaining < 0:
+                                raise ValueError('File size changed during transfer')
+                            result.write(chunk)
+                        if remaining:
+                            raise ValueError('File is truncated')
+                        result.flush()
+                        os.fsync(result.fileno())
+                for entry in reversed(entries):
+                    stamp = modified_time(entry)
+                    os.utime(contents / entry.filename, (stamp, stamp), follow_symlinks=False)
+                roots = sorted({entry.filename.split('/')[0] for entry in entries})
+                publish(contents, destination)
+                return {'paths': [str(destination / name) for name in roots]}
+
+
+def read_metadata(path):
+    with path.open('rb') as metadata:
+        data = metadata.read(4097)
+    if len(data) > 4096:
+        raise ValueError('Transfer metadata is too large')
+    return json.loads(data)
+
+
+def valid_ticket(ticket, direction):
+    if not isinstance(ticket, dict) or set(ticket) != {'id', 'token', 'direction', 'offer'}:
+        return False
+    for name, length in (('id', 32), ('token', 64)):
+        value = ticket[name]
+        if not isinstance(value, str) or len(value) != length or any(c not in '0123456789abcdef' for c in value):
+            return False
+    return ticket['direction'] == direction and valid_offer(ticket['offer'])
+
+
+def download(ticket, destination, host='10.0.2.2', port=4452):
+    if not valid_ticket(ticket, 'download'):
+        raise ValueError('Invalid download ticket')
+    connection = http.client.HTTPConnection(host, port, timeout=30)
+    try:
+        connection.request('GET', '/download/' + ticket['token'])
+        response = connection.getresponse()
+        if response.status != 200 or response.getheader('Content-Length') != str(ticket['offer']['archiveBytes']):
+            raise ValueError('Download is unavailable or changed')
+        return receive(response, ticket['offer'], destination)
+    except BaseException:
+        connection.close()
+        cancel_ticket(ticket, host, port)
+        raise
+    finally:
+        connection.close()
+
+
+def cancel_ticket(ticket, host='10.0.2.2', port=4452):
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    try:
+        connection.request('DELETE', '/' + ticket['direction'] + '/' + ticket['token'])
+        response = connection.getresponse()
+        response.read(4096)
+    except (OSError, http.client.HTTPException):
+        pass
+    finally:
+        connection.close()
+
+
+def upload_completed(ticket, host, port):
+    connection = http.client.HTTPConnection(host, port, timeout=30)
+    try:
+        connection.request('GET', '/upload/' + ticket['token'])
+        response = connection.getresponse()
+        data = response.read(4097)
+        if response.status != 200 or len(data) > 4096:
+            return False
+        status = json.loads(data)
+        return isinstance(status, dict) and status.get('state') == 'completed'
+    finally:
+        connection.close()
+
+
+def upload(ticket, archive, host='10.0.2.2', port=4452):
+    if not valid_ticket(ticket, 'upload'):
+        raise ValueError('Invalid upload ticket')
+    if upload_completed(ticket, host, port):
+        return {'state': 'completed', 'id': ticket['id']}
+    plain_path(archive)
+    fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as data:
+        if offer_for(data) != ticket['offer']:
+            raise ValueError('Prepared transfer changed')
+        data.seek(0)
+        connection = http.client.HTTPConnection(host, port, timeout=30)
+        try:
+            connection.request('POST', '/upload/' + ticket['token'], body=data,
+                               headers={'Content-Type': 'application/zip',
+                                        'Content-Length': str(ticket['offer']['archiveBytes'])})
+            response = connection.getresponse()
+            if response.status != 204:
+                raise ValueError('Upload did not complete; retry with the same ticket')
+            return {'state': 'completed', 'id': ticket['id']}
+        except (OSError, http.client.HTTPException):
+            if upload_completed(ticket, host, port):
+                return {'state': 'completed', 'id': ticket['id']}
+            raise
+        finally:
+            connection.close()
+
+
+def clipboard_selection_key(paths):
+    digest = hashlib.sha256()
+    count = 0
+    def visit(path):
+        nonlocal count
+        plain_path(path)
+        info = path.stat(follow_symlinks=False)
+        count += 1
+        if count > ENTRIES:
+            raise ValueError('Too many files in the clipboard selection')
+        digest.update(json.dumps([str(path), info.st_dev, info.st_ino,
+                                  info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+                                  info.st_mode]).encode())
+        if path.is_dir():
+            children = list(itertools.islice(path.iterdir(), ENTRIES - count + 1))
+            if len(children) > ENTRIES - count:
+                raise ValueError('Too many files in the clipboard selection')
+            for child in sorted(children):
+                visit(child)
+    for path in paths:
+        visit(path)
+    return digest.hexdigest()
+
+
+def transfer_cache():
+    cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'try-omarchy-transfers'
+    plain_path(cache)
+    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return cache
+
+
+def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
+    cache = transfer_cache()
+    destination = cache / ('received-' + os.urandom(16).hex())
+    result = download(ticket, destination, host, port)
+    paths = [Path(path) for path in result['paths']]
+    # Caller holds the bridge lock. Record before wl-copy wakes the watchers.
+    marker = state / 'last_file_selection'
+    marker.write_text(clipboard_selection_key(paths))
+    try:
+        subprocess.run(['wl-copy', '--type', 'text/uri-list'],
+                       input=('\r\n'.join(path.as_uri() for path in paths) + '\r\n').encode(),
+                       check=True, close_fds=True)
+    except BaseException:
+        marker.unlink(missing_ok=True)
+        raise
+    return result
+
+
+def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448, purpose='clipboard'):
+    paths = files.uri_paths(data, ENTRIES)
+    key = clipboard_selection_key(paths)
+    marker = state / 'last_file_selection'
+    if purpose == 'clipboard' and marker.exists() and marker.read_text() == key:
+        return {'state': 'unchanged'}
+    # Runtime state is usually a small tmpfs. Keep archive data on the same
+    # disk cache as received files, preserving the runtime directory for locks
+    # and small clipboard markers only.
+    with tempfile.TemporaryDirectory(prefix='transfer-', dir=transfer_cache()) as temporary:
+        archive = Path(temporary) / 'selection.zip'
+        offer = pack(paths, archive)
+        with socket.create_connection((host, push_port), timeout=10) as control:
+            control.settimeout(7200)
+            control.sendall((b'drop-offer:' if purpose == 'drop' else b'files-offer:') + base64.b64encode(json.dumps(offer).encode()) + b'\n')
+            stream = control.makefile('rb')
+            with stream:
+                line = stream.readline(4097)
+                if not line:
+                    raise NotImplementedError('The host uses the legacy file clipboard')
+                if len(line) > 4096 or not line.endswith(b'\n'):
+                    raise ValueError('Invalid clipboard transfer response')
+                ticket = json.loads(line)
+                if not valid_ticket(ticket, 'upload') or ticket['offer'] != offer:
+                    raise ValueError('Clipboard transfer offer changed')
+                upload(ticket, archive, host, port)
+                control.sendall(b'complete\n')
+                if stream.readline(64) != b'complete\n':
+                    raise ValueError('Clipboard changed before file delivery; copy again')
+    if purpose == 'clipboard':
+        marker.write_text(key)
+    return {'state': 'completed'}
+
+
+def clipboard_pull(host='10.0.2.2', port=4449):
+    with socket.create_connection((host, port), timeout=10) as connection:
+        connection.settimeout(None)
+        connection.sendall(b'transfer-v1\n')
+        with connection.makefile('rb') as stream:
+            while True:
+                line = stream.readline(24 << 20)
+                if not line:
+                    return
+                if not line.endswith(b'\n'):
+                    raise ValueError('Clipboard frame exceeds its limit')
+                sys.stdout.buffer.write(line)
+                sys.stdout.buffer.flush()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='command', required=True)
+    sender = sub.add_parser('pack')
+    sender.add_argument('--archive', required=True, type=Path)
+    sender.add_argument('paths', nargs='+', type=Path)
+    receiver = sub.add_parser('receive')
+    receiver.add_argument('--offer', required=True, type=Path)
+    receiver.add_argument('--destination', required=True, type=Path)
+    for name in ('download', 'upload'):
+        client = sub.add_parser(name)
+        client.add_argument('--ticket', required=True, type=Path)
+        client.add_argument('--host', default='10.0.2.2')
+        client.add_argument('--port', default=4452, type=int)
+        client.add_argument('--destination' if name == 'download' else '--archive', required=True, type=Path)
+    for name in ('clipboard-send', 'clipboard-receive', 'clipboard-pull', 'clipboard-mark', 'drop-send', 'drop-receive'):
+        client = sub.add_parser(name)
+        client.add_argument('--state', type=Path)
+    args = parser.parse_args()
+    if args.command == 'clipboard-pull':
+        clipboard_pull()
+        return
+    if args.command in ('clipboard-send', 'clipboard-receive', 'clipboard-mark', 'drop-send', 'drop-receive'):
+        if args.state is None:
+            raise ValueError('Clipboard state directory is required')
+        plain_path(args.state)
+        data = sys.stdin.buffer.read((1 << 20) + 1)
+        if len(data) > 1 << 20:
+            raise ValueError('Clipboard selection exceeds its limit')
+        if args.command == 'drop-receive':
+            ticket = json.loads(data)
+            if not valid_ticket(ticket, 'download'):
+                raise ValueError('Invalid dropped-file ticket')
+            fd, name = tempfile.mkstemp(prefix='incoming-drop-', dir=args.state)
+            with os.fdopen(fd, 'wb') as output:
+                output.write(data)
+            try:
+                subprocess.Popen(['file-transfer-window', '--ticket', name], close_fds=True, start_new_session=True)
+            except BaseException:
+                Path(name).unlink(missing_ok=True)
+                raise
+        elif args.command == 'drop-send':
+            clipboard_send(data, args.state, purpose='drop')
+        elif args.command == 'clipboard-mark':
+            (args.state / 'last_file_selection').write_text(clipboard_selection_key(files.uri_paths(data, ENTRIES)))
+        elif args.command == 'clipboard-send':
+            clipboard_send(data, args.state)
+        else:
+            clipboard_receive(json.loads(data), args.state)
+        return
+    if args.command == 'pack':
+        result = pack(args.paths, args.archive)
+    elif args.command == 'receive':
+        result = receive(sys.stdin.buffer, read_metadata(args.offer), args.destination)
+    elif args.command == 'download':
+        result = download(read_metadata(args.ticket), args.destination, args.host, args.port)
+    else:
+        result = upload(read_metadata(args.ticket), args.archive, args.host, args.port)
+    print(json.dumps(result))
+
+
+def interrupt(*_):
+    raise KeyboardInterrupt()
+
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, interrupt)
+    try:
+        main()
+    except NotImplementedError as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(3)
+    except (subprocess.CalledProcessError, ValueError, OSError, http.client.HTTPException, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
+        print(f'File transfer: {error or "cancelled"}', file=sys.stderr)
+        if len(sys.argv) > 1 and sys.argv[1] in ('clipboard-send', 'clipboard-receive') and shutil.which('notify-send'):
+            subprocess.run(['notify-send', 'File copy did not finish', str(error or 'Transfer cancelled')], check=False, timeout=5)
+        sys.exit(1)

@@ -25,7 +25,8 @@ type settings struct {
 	// Guest RAM in MiB. 0 sizes it to the machine automatically.
 	MemoryMiB int `json:"memoryMiB"`
 	// Guest CPUs. 0 sizes them to the machine automatically.
-	CPUs int `json:"cpus,omitempty"`
+	CPUs     int `json:"cpus,omitempty"`
+	Displays int `json:"displays,omitempty"`
 	// Windows folder shared into Omarchy. Empty means no share.
 	Share string `json:"share"`
 	// ShareDisabled remembers a chosen folder while preventing it from being
@@ -35,7 +36,9 @@ type settings struct {
 	// older install that has never been offered the recommended exchange folder.
 	SharedFolderPrompted bool `json:"sharedFolderPrompted,omitempty"`
 	// Loopback port forwards in -forward syntax, for example "tcp:2222:22".
-	Forwards []string `json:"forwards"`
+	Forwards        []string          `json:"forwards"`
+	LANPublic       bool              `json:"lanPublic,omitempty"`
+	ForwardAdapters map[string]string `json:"forwardAdapters,omitempty"`
 	// Public key file authorized for the Omarchy account when a forward
 	// targets sshd. Empty picks the usual ~/.ssh/id_*.pub.
 	SSHKey string `json:"sshKey"`
@@ -125,6 +128,9 @@ func saveSettings(path string, s settings) error {
 }
 
 func (s settings) validate() error {
+	if s.Displays < 0 || s.Displays > maximumGuestDisplays {
+		return fmt.Errorf("displays must be between 1 and %d", maximumGuestDisplays)
+	}
 	if s.MemoryMiB != 0 && (s.MemoryMiB < minimumGuestMemoryMiB || s.MemoryMiB > maximumGuestMemoryMiB) {
 		return fmt.Errorf("memoryMiB must be 0 (automatic) or between %d and %d", minimumGuestMemoryMiB, maximumGuestMemoryMiB)
 	}
@@ -209,6 +215,15 @@ func shouldOfferRecommendedShare(s settings, portable, explicitShare bool) bool 
 // Forwards are all-or-nothing: any -forward or -ssh on the command line
 // replaces the file's list rather than merging with it.
 func applySettings(cfg *config, s settings, explicit map[string]bool, forwards *forwardList, sshKeyPath *string) error {
+	if !explicit["displays"] {
+		cfg.displays = guestDisplayCount(s.Displays)
+	}
+	if cfg.displays < 1 || cfg.displays > maximumGuestDisplays {
+		return fmt.Errorf("displays must be between 1 and %d", maximumGuestDisplays)
+	}
+	if !explicit["lan-public"] {
+		cfg.lanPublic = s.LANPublic
+	}
 	if !explicit["fullscreen"] {
 		cfg.fullscreen = s.Fullscreen
 	}

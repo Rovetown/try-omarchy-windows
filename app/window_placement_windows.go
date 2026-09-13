@@ -6,6 +6,7 @@ import (
 )
 
 var (
+	procGetWindowRect       = user32.NewProc("GetWindowRect")
 	procGetWindowPlacement  = user32.NewProc("GetWindowPlacement")
 	procSetWindowPlacement  = user32.NewProc("SetWindowPlacement")
 	procEnumDisplayMonitors = user32.NewProc("EnumDisplayMonitors")

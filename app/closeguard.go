@@ -3,8 +3,10 @@
 package main
 
 import (
+	"context"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -38,15 +40,15 @@ const (
 // asks for confirmation instead. Runs on the shared hook thread.
 func mouseHookCallback(nCode, wParam, lParam uintptr) uintptr {
 	if int32(nCode) >= 0 && wParam == wmLbuttondown {
-		if hwnd := qemuHwnd.Load(); hwnd != 0 {
-			pt := *(*[2]int32)(unsafe.Pointer(lParam)) // MSLLHOOKSTRUCT.pt
-			packed := uintptr(uint64(uint32(pt[1]))<<32 | uint64(uint32(pt[0])))
-			if under, _, _ := procWindowFromPoint.Call(packed); under == hwnd {
-				lp := uintptr(uint32(pt[0])&0xFFFF | uint32(pt[1])<<16)
-				if ht, _, _ := procSendMessageW.Call(hwnd, wmNchittest, 0, lp); ht == htCloseBtn {
-					requestQuitConfirm()
-					return 1 // swallow the click
-				}
+		pt := *(*[2]int32)(unsafe.Pointer(lParam))
+		packed := uintptr(uint64(uint32(pt[1]))<<32 | uint64(uint32(pt[0])))
+		hwnd, _, _ := procWindowFromPoint.Call(packed)
+		if isQemuDisplayWindow(hwnd, qemuPid.Load()) {
+			lp := uintptr(uint32(pt[0])&0xffff | uint32(pt[1])<<16)
+			if hit, _, _ := procSendMessageW.Call(hwnd, wmNchittest, 0, lp); hit == htCloseBtn {
+				qemuHwnd.Store(hwnd)
+				requestQuitConfirm()
+				return 1
 			}
 		}
 	}
@@ -75,10 +77,17 @@ func runCloseGuard() {
 			mbYesNo|mbIconQuestion|mbDefbutton2|mbTopmost|mbSetForeground)
 		if r == idYes {
 			logf("close confirmed - graceful guest shutdown")
-			if c := qmpConnect(qmpToolsPort, 8e9); c != nil {
-				c.writeLine(`{"execute":"system_powerdown"}`)
-				c.close()
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			c, err := dialQMPControl(ctx, qmpToolsPort)
+			if err == nil {
+				err = c.Call(ctx, "system_powerdown", nil, nil)
+				c.Close()
 			}
+			cancel()
+			if err != nil {
+				errorBox("Omarchy did not acknowledge the shutdown request. Check its window before retrying.\n\n" + err.Error())
+			}
+
 			// The guest shuts down; the supervisor reaps/exits as usual.
 		}
 		confirmOpen.Store(false)

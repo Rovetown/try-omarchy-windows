@@ -3,14 +3,36 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// buildQemuArgs is the argument recipe from scripts/launch-omarchy.ps1,
-// unchanged: GPU mode is WINQ-EMU's stack (patched WHPX survives -cpu host;
+// Keep the original failure in shell.log before a fallback truncates stderr.
+// Limit the tail so a noisy failed runtime cannot flood the launcher log.
+func qemuStartupFailureTail(vmDir string) string {
+	f, err := os.Open(filepath.Join(vmDir, "qemu-stderr.log"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	const limit = 16 * 1024
+	start := max(int64(0), info.Size()-limit)
+	data, err := io.ReadAll(io.NewSectionReader(f, start, limit))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// buildQemuArgs selects the native runtime devices and private controls.
+// Rendering follows scripts/launch-omarchy.ps1: GPU mode is WINQ-EMU's stack (patched WHPX survives -cpu host;
 // virtio-vga-gl IS the VGA device, so no -vga none), CPU mode is stock QEMU
 // with the fastest flags upstream WHPX survives (any XSAVE/AVX feature panics
 // the guest kernel) and the mandatory -vga none for virtio-gpu-pci.
@@ -32,7 +54,7 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 	if cfg.useGpu {
 		args = append(args,
 			"-machine", machine, "-cpu", "host", "-smp", smp, "-m", mem,
-			"-device", "virtio-vga-gl,blob=on,hostmem="+hostmem+",venus=on",
+			"-device", displayDevice(cfg, hostmem),
 			// The guest cursor is visible in the QEMU profile. Forcing SDL's host
 			// cursor as well produces two pointers that separate during motion.
 			// Keep only the guest cursor unless the diagnostic fallback is set.
@@ -46,7 +68,7 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 		args = append(args,
 			"-machine", machine, "-cpu", "qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+aes",
 			"-smp", smp, "-m", mem,
-			"-vga", "none", "-device", "virtio-gpu-pci,id=gpu0",
+			"-vga", "none", "-device", displayDevice(cfg, hostmem),
 			"-display", sdlDisplay(false, cfg.hostCursor),
 			"-serial", "file:"+filepath.Join(vm, "serial.log"),
 		)
@@ -66,6 +88,9 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 		"-device", "virtio-keyboard-pci", "-device", "virtio-tablet-pci",
 		"-device", "virtio-net-pci,netdev=n0", "-netdev", netdevArg(cfg.forwards),
 		"-device", "virtio-rng-pci",
+		// The q35 root bus cannot hotplug a PCIe controller. USB devices
+		// attach to this controller after the guest has started.
+		"-device", "qemu-xhci,id="+usbControllerID,
 		// The guest must not sleep: a suspended VM leaves the window frozen
 		// with no way back from the keyboard, and Omarchy's power menu
 		// offers suspend whenever the kernel advertises it. With S3 and S4
@@ -77,9 +102,9 @@ func buildQemuArgs(cfg *config, cmdline string) []string {
 		// has no device (QEMU exits at startup otherwise).
 		"-audiodev", cfg.audio+",id=snd",
 		"-device", "virtio-sound-pci,audiodev=snd",
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server=on,wait=off", qmpToolsPort),
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server=on,wait=off", qmpFwdPort),
-		"-qmp", fmt.Sprintf("tcp:127.0.0.1:%d,server=on,wait=off", qmpSupPort),
+		"-qmp", "unix:"+qemuOptionValue(filepath.Join(cfg.qmpDir, qmpControlName(qmpToolsPort)))+",server=on,wait=off",
+		"-qmp", "unix:"+qemuOptionValue(filepath.Join(cfg.qmpDir, qmpControlName(qmpFwdPort)))+",server=on,wait=off",
+		"-qmp", "unix:"+qemuOptionValue(filepath.Join(cfg.qmpDir, qmpControlName(qmpSupPort)))+",server=on,wait=off",
 		"-D", filepath.Join(vm, "qemu.log"),
 		// In-guest reboot/poweroff wedges upstream WHPX (vCPUs never return
 		// from system reset). Exit instead; the supervisor relaunches on reset.
@@ -284,6 +309,22 @@ func prepareDisk(cfg *config, expandedMiB int64) error {
 // staging file. Its backing path is relative so drive-letter changes do not
 // break it, and an interrupted creation never appears under the final name.
 func preparePortableDisk(cfg *config, expandedBytes int64) error {
+	if info, err := os.Lstat(cfg.disk); err == nil {
+		dir := cfg.dir
+		if dir == "" {
+			dir = filepath.Dir(cfg.vmDir)
+		}
+		disk, inspectErr := inspectInstallationDisk(dir)
+		if inspectErr == nil && disk.Format == "qcow2" {
+			return growPortableDisk(dir, disk, expandedBytes)
+		}
+		if inspectErr != nil && info.Size() >= qcow2HeaderSize {
+			return inspectErr
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	backing := filepath.ToSlash(filepath.Join("..", "guest", "rootfs.ext4"))
 	backingSHA256, ok := installReceiptArtifactSHA256(cfg.guestDir, "rootfs.ext4")
 	if !ok {

@@ -110,19 +110,22 @@ func activateMovedInstallation(m *installationMove) error {
 	}
 	// Update only links owned by this install. Repeating this step after a
 	// failure accepts links already pointing to the destination.
-	const script = `$ErrorActionPreference='Stop'; $shell=New-Object -ComObject WScript.Shell; ` +
-		`$programs=[Environment]::GetFolderPath('Programs'); $desktop=[Environment]::GetFolderPath('DesktopDirectory'); ` +
-		`$paths=@((Join-Path $programs 'Try Omarchy.lnk'),(Join-Path $programs 'Try Omarchy Settings.lnk'),(Join-Path $desktop 'Try Omarchy.lnk'),(Join-Path $env:TRYOMARCHY_MOVE_DEST 'Start Omarchy.lnk'),(Join-Path $env:TRYOMARCHY_MOVE_DEST 'Settings.lnk')); ` +
-		`foreach($path in $paths){if(Test-Path -LiteralPath $path){$link=$shell.CreateShortcut($path); ` +
-		`if([StringComparer]::OrdinalIgnoreCase.Equals($link.TargetPath,$env:TRYOMARCHY_MOVE_OLD) -or [StringComparer]::OrdinalIgnoreCase.Equals($link.TargetPath,$env:TRYOMARCHY_MOVE_NEW)){ ` +
-		`$settings=$link.Arguments -match '(^|\s)-settings(\s|$)'; $link.TargetPath=$env:TRYOMARCHY_MOVE_NEW; ` +
-		`$link.Arguments=$env:TRYOMARCHY_MOVE_ARGS; if($settings){$link.Arguments+=' -settings'}; ` +
-		`$link.WorkingDirectory=$env:TRYOMARCHY_MOVE_DEST; $link.IconLocation=$env:TRYOMARCHY_MOVE_NEW+',0'; $link.Save()}}}`
-	cmd := exec.Command(system32("WindowsPowerShell\\v1.0\\powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "TRYOMARCHY_MOVE_OLD="+filepath.Join(m.Source, stableLauncherName), "TRYOMARCHY_MOVE_NEW="+target, "TRYOMARCHY_MOVE_DEST="+m.Destination, "TRYOMARCHY_MOVE_ARGS="+shortcutArguments(m.Destination))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("updating moved shortcuts: %w: %s", err, strings.TrimSpace(string(out)))
+	paths, err := launcherShortcutPaths()
+	if err != nil {
+		return err
+	}
+	paths = append(paths, filepath.Join(m.Destination, "Start Omarchy.lnk"), filepath.Join(m.Destination, "Settings.lnk"))
+	if err := changeOwnedShortcuts(paths, []string{filepath.Join(m.Source, stableLauncherName), target}, func(path, args string) error {
+		newArgs := shortcutArguments(m.Destination)
+		for _, arg := range strings.Fields(args) {
+			if arg == "-settings" {
+				newArgs = settingsShortcutArguments(m.Destination)
+				break
+			}
+		}
+		return writeShellLink(path, target, newArgs, m.Destination)
+	}); err != nil {
+		return err
 	}
 	if err := registerUninstallEntry(target, m.Destination); err != nil {
 		return err

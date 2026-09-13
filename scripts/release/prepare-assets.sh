@@ -26,6 +26,8 @@ PY
 
 declare -A seen_names=()
 for archive in "${runtime_archives[@]}"; do
+  # Native Windows Python writes CRLF even when called from Git Bash.
+  archive=${archive%$'\r'}
   IFS=$'\t' read -r role url name digest <<<"$archive"
   [[ $role == runtime || $role == source ]]
   [[ -n $url && $name != */* && $digest =~ ^[0-9a-f]{64}$ ]] || {

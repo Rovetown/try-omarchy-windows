@@ -1,10 +1,10 @@
-# QMP driver for the running Omarchy guest (port 4445).
+# QMP driver for the running Omarchy guest over its private socket.
 # Usage: qmp.ps1 shot NAME | type STRING | key NAME[,NAME...] | status
 param([Parameter(Mandatory)][string]$op, [string]$arg = '')
 $ErrorActionPreference = 'Stop'
 
-$tcp = New-Object Net.Sockets.TcpClient('127.0.0.1', 4445)
-$s = $tcp.GetStream(); $s.ReadTimeout = 5000
+. "$PSScriptRoot\..\qmp-transport.ps1"
+$s = New-OmarchyQmpStream 4445; $s.ReadTimeout = 5000
 $w = New-Object IO.StreamWriter($s); $w.AutoFlush = $true
 $r = New-Object IO.StreamReader($s)
 $r.ReadLine() | Out-Null
@@ -81,4 +81,4 @@ switch ($op) {
     }
     default { throw "unknown op: $op" }
 }
-$tcp.Close()
+$s.Dispose()

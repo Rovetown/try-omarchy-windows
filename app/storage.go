@@ -102,15 +102,12 @@ func saveStorageSettings(dir string, size int) error {
 	return os.Rename(f.Name(), filepath.Join(dir, storageSettingsFilename))
 }
 
-func requestedDiskMiB(factoryMiB int64, requestedGiB int, portable bool) (int64, error) {
+func requestedDiskMiB(factoryMiB int64, requestedGiB int, _ bool) (int64, error) {
 	if factoryMiB <= 0 || factoryMiB > (1<<63-1)/(1024*1024) {
 		return 0, fmt.Errorf("invalid expanded disk size: %d MiB", factoryMiB)
 	}
 	if err := validateDiskGiB(requestedGiB); err != nil {
 		return 0, err
-	}
-	if portable && requestedGiB != 0 {
-		return 0, fmt.Errorf("custom disk capacity is not supported in portable mode; use 0 to keep the existing portable disk")
 	}
 	requestedMiB := int64(requestedGiB) * 1024
 	if requestedMiB > factoryMiB {

@@ -1,0 +1,15 @@
+--- a/ui/sdl2-gl.c
++++ b/ui/sdl2-gl.c
+@@ -91,6 +91,12 @@
+     scon->surface = new_surface;
+ 
+     if (surface_is_placeholder(new_surface) && qemu_console_get_index(dcl->con)) {
++        /* A disabled secondary output can receive scanout_disable after this
++         * switch. Tear down its framebuffer while this context still exists,
++         * and leave scanout mode before destroying the shader and window.
++         */
++        egl_fb_destroy(&scon->guest_fb);
++        scon->scanout_mode = false;
+         qemu_gl_fini_shader(scon->gls);
+         scon->gls = NULL;
+         sdl2_window_destroy(scon);

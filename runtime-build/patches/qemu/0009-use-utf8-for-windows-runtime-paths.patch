@@ -1,0 +1,62 @@
+--- a/util/cutils.c
++++ b/util/cutils.c
+@@ -25,6 +25,7 @@
+ #include "qemu/osdep.h"
+ #include "qemu/host-utils.h"
+ #include <math.h>
++#include <locale.h>
+ 
+ #ifdef __FreeBSD__
+ #include <sys/sysctl.h>
+@@ -1050,6 +1051,16 @@
+     char buf[MAX_PATH];
+     DWORD len;
+ 
++    /* QEMU filenames are UTF-8. The UCRT otherwise interprets fopen/access
++     * paths using the legacy code page, even with a UTF-8 Windows manifest.
++     * This runs before option parsing in both the emulator and qemu-img.
++     * Leave numeric parsing and formatting in the C locale.
++     */
++    if (!setlocale(LC_CTYPE, ".UTF8")) {
++        fprintf(stderr, "QEMU requires UTF-8 support in the Windows UCRT\n");
++        exit(EXIT_FAILURE);
++    }
++
+     if (exec_dir) {
+         return;
+     }
+--- a/version.rc
++++ b/version.rc
+@@ -27,3 +27,6 @@
+ }
+ 
+ IDI_ICON1 ICON "pc-bios/winq-emu.ico"
++
++/* Per-process UTF-8 for narrow Windows APIs; no host locale change. */
++1 24 "qemu.manifest"
+--- /dev/null
++++ b/qemu.manifest
+@@ -0,0 +1,23 @@
++<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
++<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
++<security>
++<requestedPrivileges>
++<requestedExecutionLevel level="asInvoker"/>
++</requestedPrivileges>
++</security>
++</trustInfo>
++<compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
++<application>
++<supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
++<supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
++<supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
++<supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
++<supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
++</application>
++</compatibility>
++<application xmlns="urn:schemas-microsoft-com:asm.v3">
++  <windowsSettings>
++    <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
++  </windowsSettings>
++</application>
++</assembly>

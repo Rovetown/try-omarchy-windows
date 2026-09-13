@@ -18,7 +18,7 @@ mkdir -p "$STATE"
 # wl-paste supplies the selected text on stdin. Keeping it in a file preserves
 # trailing newlines and avoids a second clipboard read after the selection moves.
 case "${1:-}" in
---push|--receive|--push-image|--receive-image|--push-files|--receive-files)
+--push|--receive|--push-image|--receive-image|--push-files|--receive-files|--receive-transfer|--receive-drop)
   # URI selections belong to the file watcher, never the text bridge.
   if [ "$1" = --push ] && wl-paste --list-types 2>/dev/null | grep -Eq '^(text/uri-list|x-special/gnome-copied-files)$'; then exit 0; fi
   kind=text
@@ -36,7 +36,19 @@ case "${1:-}" in
   # overwrite the state of a newer host value received while it was sending.
   exec 9> "$STATE/lock"
   flock -x 9 || exit 1
+  if [ "$1" = --receive-drop ]; then
+    file-transfer drop-receive --state "$STATE" < "$outgoing" || exit 1
+    exit 0
+  fi
+  if [ "$1" = --receive-transfer ]; then
+    file-transfer clipboard-receive --state "$STATE" < "$outgoing" || exit 1
+    exit 0
+  fi
   if [ "$1" = --push-files ]; then
+    file-transfer clipboard-send --state "$STATE" < "$outgoing"
+    result=$?
+    [ "$result" -eq 0 ] && exit 0
+    [ "$result" -eq 3 ] || exit "$result"
     clipboard-files pack < "$outgoing" > "$outgoing.zip" || { rm -f "$outgoing.zip"; exit 1; }
     mv "$outgoing.zip" "$outgoing" || exit 1
   fi
@@ -54,6 +66,7 @@ case "${1:-}" in
       fi
       sha256sum < "$outgoing.zip" | cut -d' ' -f1 > "$STATE/last_content"
       rm -f "$outgoing.zip"
+      file-transfer clipboard-mark --state "$STATE" < "$outgoing.uris" || exit 1
       wl-copy --type text/uri-list < "$outgoing.uris" 9>&-
       result=$?
       if [ "$result" -ne 0 ]; then clipboard-files discard < "$outgoing.uris" || true; fi
@@ -132,12 +145,14 @@ while :; do
     while :; do
       # Keep socat directly connected to read. An extra pipe stage buffers
       # small clipboard payloads and makes ordinary text appear stuck.
-      socat -u TCP:$HOST:$PULL_PORT,connect-timeout=3 - 2>/dev/null | while IFS= read -r line; do
+      file-transfer clipboard-pull 2>/dev/null | while IFS= read -r line; do
         line=${line%"$(printf '\r')"}
         receive=--receive
         case $line in
         png:*) receive=--receive-image; line=${line#png:} ;;
         files:*) receive=--receive-files; line=${line#files:} ;;
+        transfer:*) receive=--receive-transfer; line=${line#transfer:} ;;
+        drop:*) receive=--receive-drop; line=${line#drop:} ;;
         esac
         printf '%s' "$line" | base64 -d > "$STATE/incoming" 2>/dev/null || continue
         "$0" $receive < "$STATE/incoming" || break

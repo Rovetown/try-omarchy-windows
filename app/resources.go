@@ -83,13 +83,13 @@ func pickGuestMemMiB(gpu bool, totalMiB, availMiB int) int {
 // resources. It follows the guest size as it always has; growing it to 8 GiB
 // on large machines waits for a physical GPU run (hostTotalMiB is kept for
 // that change).
-func gpuHostMem(memMiB, hostTotalMiB int) string {
+func gpuHostMem(memMiB, hostTotalMiB int) uint64 {
 	_ = hostTotalMiB
 	switch {
 	case memMiB < 3072:
-		return "1G"
+		return 1 << 30
 	case memMiB < 4096:
-		return "2G"
+		return 2 << 30
 	}
-	return "4G"
+	return 4 << 30
 }

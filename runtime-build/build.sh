@@ -102,6 +102,16 @@ git -C "$qemu_source" submodule update --init --depth=1
 git -C "$qemu_source/roms/edk2" submodule update --init --depth=1
 apply_locked_patches qemu "$qemu_source"
 apply_locked_patches virglrenderer "$virgl_source"
+python "$recipe/test-win32-handles.py" "$virgl_source"
+python "$recipe/test-host-memory.py" "$virgl_source"
+python "$recipe/test-usb-port.py" "$qemu_source/hw/usb/host-libusb.c"
+python "$recipe/test-socket-close.py" "$qemu_source/util/oslib-win32.c"
+python "$recipe/test-file-drop.py" "$qemu_source/ui/sdl2.c"
+python "$recipe/test-windows-share.py" "$qemu_source/hw/9pfs/9p-util-win32.c"
+python "$recipe/test-sdl-scanout.py" "$qemu_source/ui/sdl2-gl.c"
+python "$recipe/test-sdl-input.py" "$qemu_source/ui/sdl2.c"
+python "$recipe/test-sdl-context.py" "$qemu_source/ui/sdl2.c"
+python "$qemu_source/scripts/qapi-gen.py" -o "$work/qapi-validation" -b "$qemu_source/qapi/qapi-schema.json"
 
 virgl_build="$work/virgl-build"
 meson setup "$virgl_build" "$virgl_source" \
@@ -124,6 +134,7 @@ mkdir -p "$qemu_build"
         --enable-opengl \
         --enable-virglrenderer \
         --enable-slirp \
+        --enable-libusb \
         --disable-docs \
         --disable-plugins
 )
@@ -252,7 +263,10 @@ python "$recipe/archive.py" "$source_bundle" "$source_zip" --epoch "$source_date
 )
 
 mkdir -p "$output/smoke"
-cp "$runtime/bin/qemu-system-x86_64.exe" "$output/smoke/"
+for binary in qemu-system-x86_64.exe qemu-system-x86_64w.exe qemu-img.exe; do
+    cp "$runtime/bin/$binary" "$output/smoke/"
+done
 cp "$runtime/bin"/*.dll "$output/smoke/"
+cp -R "$runtime/bin/share" "$output/smoke/"
 python "$recipe/verify.py" "$output"
 echo "Built $(du -h "$runtime_zip" | cut -f1) runtime and $(du -h "$source_zip" | cut -f1) source archive"

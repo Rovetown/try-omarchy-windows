@@ -1,0 +1,56 @@
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -72,8 +72,16 @@
+ static struct sdl2_console *get_scon_from_window(uint32_t window_id)
+ {
+     int i;
++    SDL_Window *window = SDL_GetWindowFromID(window_id);
++
++    /* Queued events may outlive a disabled secondary window. NULL must not
++     * match another console whose window has not been created yet.
++     */
++    if (!window) {
++        return NULL;
++    }
+     for (i = 0; i < sdl2_num_outputs; i++) {
+-        if (sdl2_console[i].real_window == SDL_GetWindowFromID(window_id)) {
++        if (sdl2_console[i].real_window == window) {
+             return &sdl2_console[i];
+         }
+     }
+@@ -518,12 +526,16 @@
+     struct sdl2_console *scon = get_scon_from_window(ev->motion.windowID);
+     int scr_w, scr_h, surf_w, surf_h, x, y, dx, dy;
+ 
+-    if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
++    if (!scon || !scon->real_window || !scon->surface ||
++        !qemu_console_is_graphic(scon->dcl.con)) {
+         return;
+     }
+ 
+     int max_x, max_y;
+     SDL_GetWindowSize(scon->real_window, &scr_w, &scr_h);
++    if (scr_w <= 0 || scr_h <= 0) {
++        return;
++    }
+     if (qemu_input_is_absolute(scon->dcl.con) || absolute_enabled) {
+         max_x = scr_w - 1;
+         max_y = scr_h - 1;
+@@ -556,12 +568,16 @@
+     struct sdl2_console *scon = get_scon_from_window(ev->button.windowID);
+     int scr_w, scr_h, x, y;
+ 
+-    if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
++    if (!scon || !scon->real_window || !scon->surface ||
++        !qemu_console_is_graphic(scon->dcl.con)) {
+         return;
+     }
+ 
+     bev = &ev->button;
+     SDL_GetWindowSize(scon->real_window, &scr_w, &scr_h);
++    if (scr_w <= 0 || scr_h <= 0) {
++        return;
++    }
+     x = (int64_t)bev->x * surface_width(scon->surface) / scr_w;
+     y = (int64_t)bev->y * surface_height(scon->surface) / scr_h;
+ 

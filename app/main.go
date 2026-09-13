@@ -30,18 +30,22 @@ import (
 const appTitle = "Try Omarchy"
 
 type config struct {
-	dir, hostDir, payloadDir string
-	winqEmu, share           string
-	fresh, fullscreen, noGpu bool
-	hostCursor               bool
-	instant, portable        bool
-	guestDir, vmDir, disk    string
-	diskFormat               string
-	qemu                     string
-	useGpu                   bool
-	supportsSharing          bool
-	audio                    string
-	memMiB                   int
+	dir, hostDir, payloadDir    string
+	winqEmu, share              string
+	fresh, fullscreen, noGpu    bool
+	hostCursor                  bool
+	lanPublic                   bool
+	instant, portable           bool
+	guestDir, vmDir, disk       string
+	qmpDir                      string
+	diskFormat                  string
+	qemu                        string
+	useGpu                      bool
+	supportsSharing             bool
+	audio                       string
+	memMiB                      int
+	displays                    int
+	displayWidth, displayHeight int
 	// kernel-irqchip=off keeps WHPX from requesting nested virtualization,
 	// which some hosts advertise and then refuse (issue #19). Set by the
 	// startup retry, never by a flag.
@@ -132,10 +136,11 @@ func main() {
 	flag.StringVar(&cfg.winqEmu, "winq", `C:\WINQ-EMU`, "WINQ-EMU install path (GPU mode)")
 	flag.StringVar(&cfg.share, "share", "", "Windows folder shared into Omarchy at /mnt/host and as ~/<folder name>")
 	flag.BoolVar(&cfg.fresh, "fresh", false, "start over and retain the previous writable disk for recovery")
+	flag.IntVar(&cfg.displays, "displays", 1, "number of guest displays (1 to 16)")
 	flag.BoolVar(&cfg.fullscreen, "fullscreen", false, "start fullscreen (Immersive)")
 	flag.IntVar(&cfg.memOverrideMiB, "memory", 0, "guest RAM in MiB (default: sized to this PC)")
 	flag.IntVar(&cfg.cpuOverride, "cpus", 0, "guest CPUs (default: sized to this PC)")
-	flag.IntVar(&cfg.diskGiB, "disk-size", 0, "guest disk capacity in GiB (0: default; grows existing standard disks, never shrinks)")
+	flag.IntVar(&cfg.diskGiB, "disk-size", 0, "guest disk capacity in GiB (0: default; grows existing disks, never shrinks)")
 	flag.BoolVar(&cfg.noGpu, "nogpu", false, "force CPU rendering even if WINQ-EMU is installed (same as -render cpu)")
 	renderFlag := flag.String("render", "", "rendering path: auto (default), gpu, or cpu")
 	timeZoneFlag := flag.String("timezone", "", "guest time zone: blank follows Windows, keep leaves the guest alone, or an IANA name such as Europe/Berlin")
@@ -145,9 +150,12 @@ func main() {
 	flag.BoolVar(&cfg.instant, "instant", false, "skip first-boot questions and use the trial account")
 	flag.BoolVar(&cfg.portable, "portable", false, "run entirely from data and payload folders beside the executable")
 	var forwards forwardList
-	flag.Var(&forwards, "forward", "forward a Windows loopback port into Omarchy, as tcp:2222:22 or 8080:80 (repeatable)")
+	flag.Var(&forwards, "forward", "forward a Windows port into Omarchy: tcp:2222:22 (local), tcp:192.168.1.5:8080:80 (LAN); repeatable")
+	firewallPlan := flag.String("firewall-plan", "", "internal: apply owned LAN firewall rules")
+	flag.BoolVar(&cfg.lanPublic, "lan-public", false, "allow explicitly selected LAN forwards on public networks")
 	sshPort := flag.Int("ssh", 0, "forward this Windows loopback port to Omarchy's sshd and start sshd for the session")
-	recoveryAction := flag.String("recovery", "", "open backup, restore, reset, move, or uninstall controls for a stopped standard install")
+	openDevices := flag.Bool("devices", false, "manage USB devices in the running VM")
+	recoveryAction := flag.String("recovery", "", "open backup, restore, snapshots, portable-create, reset, move, or uninstall controls")
 	uninstall := flag.Bool("uninstall", false, "remove this Try Omarchy installation: shortcuts, the Apps & features entry, and the data folder")
 	uninstallFinish := flag.Bool("uninstall-finish", false, "internal: delete the data folder after the launcher inside it exits")
 	reclaim := flag.Bool("reclaim", false, "ask the running Omarchy to zero its free space so the disk file shrinks after shutdown, then exit")
@@ -172,6 +180,12 @@ func main() {
 	updateWaitPID := flag.Int("update-wait-pid", 0, "internal: process to wait for before replacing the launcher")
 	updateRestartArgs := flag.String("update-restart-args", "", "internal: encoded launcher restart arguments")
 	flag.Parse()
+	if *openDevices {
+		if err := runUSBDeviceUI(); err != nil {
+			fatal("Could not open USB devices: %v", err)
+		}
+		return
+	}
 	if *uninstall {
 		if *recoveryAction != "" && *recoveryAction != "uninstall" {
 			fatal("Choose one recovery action: backup, restore, reset, or uninstall.")
@@ -179,11 +193,11 @@ func main() {
 		*recoveryAction = "uninstall"
 	}
 	maintenance := *backupPath != "" || *restorePath != "" || *recoveryAction != ""
-	if *recoveryAction != "" && (*recoveryAction != "backup" && *recoveryAction != "restore" && *recoveryAction != "reset" && *recoveryAction != "uninstall" && *recoveryAction != "move" && *recoveryAction != "move-cleanup" || *backupPath != "" || *restorePath != "") {
-		fatal("Choose one recovery action: backup, restore, reset, move, or uninstall.")
+	if *recoveryAction != "" && (*recoveryAction != "backup" && *recoveryAction != "restore" && *recoveryAction != "reset" && *recoveryAction != "uninstall" && *recoveryAction != "move" && *recoveryAction != "move-cleanup" && *recoveryAction != "snapshots" && *recoveryAction != "portable-create" || *backupPath != "" || *restorePath != "") {
+		fatal("Choose one recovery action: backup, restore, snapshots, portable-create, reset, move, or uninstall.")
 	}
-	if maintenance && (*backupPath != "" && *restorePath != "" || cfg.portable || cfg.fresh || *openSettings || *diagnostics || *enableWhp || *applyLauncherUpdateFlag || *applyLauncherRollbackFlag) {
-		fatal("Use one recovery action on a stopped standard install, without other maintenance options.")
+	if maintenance && (*backupPath != "" && *restorePath != "" || cfg.portable && !portableRecoveryAllowed(*recoveryAction, *backupPath, *restorePath) || cfg.fresh || *openSettings || *diagnostics || *enableWhp || *applyLauncherUpdateFlag || *applyLauncherRollbackFlag) {
+		fatal("Use one recovery action on a stopped installation, without other maintenance options.")
 	}
 	explicitFlags := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
@@ -207,6 +221,13 @@ func main() {
 	// code (see setup.go); it must not touch the single-instance port.
 	if *enableWhp {
 		os.Exit(runDismEnable())
+	}
+	if *firewallPlan != "" {
+		if err := applyEncodedLANFirewall(*firewallPlan); err != nil {
+			errorBox(err.Error())
+			os.Exit(1)
+		}
+		return
 	}
 	if *reclaim {
 		os.Exit(sendLifecycleCommand("reclaim"))
@@ -281,21 +302,25 @@ func main() {
 			}
 			return
 		}
-		// Settings and diagnostics may be opened from the running app's tray.
-		// They must not inspect or roll back an update owned by that parent.
-		if !maintenance && !*openSettings && !*diagnostics {
-			restartArgs, err := encodeRestartArgs(os.Args[1:])
-			if err != nil {
-				fatal("Could not preserve launcher arguments for updates: %v", err)
-			}
-			if rollingBack, recoverErr := recoverLauncherUpdate(cfg.dir, restartArgs); recoverErr != nil {
-				logf("launcher update recovery: %v", recoverErr)
-			} else if rollingBack {
-				return
-			}
+	}
+	if !*openSettings && !*diagnostics && !*applyLauncherUpdateFlag && !*applyLauncherRollbackFlag {
+		if err := recoverCheckpointRollback(cfg.dir); err != nil {
+			fatal("Cannot finish snapshot recovery: %v", err)
 		}
 	}
-
+	// Settings and diagnostics may be opened from the running app's tray.
+	// They must not inspect or roll back an update owned by that parent.
+	if !maintenance && !*openSettings && !*diagnostics {
+		restartArgs, err := encodeRestartArgs(os.Args[1:])
+		if err != nil {
+			fatal("Could not preserve launcher arguments for updates: %v", err)
+		}
+		if rollingBack, recoverErr := recoverLauncherUpdate(cfg.dir, restartArgs); recoverErr != nil {
+			logf("launcher update recovery: %v", recoverErr)
+		} else if rollingBack {
+			return
+		}
+	}
 	if *recoveryAction != "" {
 		err := runRecoveryUI(cfg.dir, *recoveryAction)
 		reportRecoveryResult(err)
@@ -396,6 +421,16 @@ func main() {
 		fatal("%v.", err)
 	}
 	cfg.forwards = forwards
+	if !explicitFlags["forward"] && !explicitFlags["ssh"] && len(userSettings.ForwardAdapters) > 0 {
+		adapters, err := availableLANAdapters()
+		if err != nil {
+			fatal("Could not read network adapters: %v", err)
+		}
+		cfg.forwards, err = resolveForwardAdapters(forwards, userSettings.ForwardAdapters, adapters)
+		if err != nil {
+			fatal("Could not prepare LAN forwarding: %v", err)
+		}
+	}
 	cfg.sshKey = sshKey
 	if sshRequested(cfg.forwards) && cfg.sshKey == "" {
 		logf("ssh requested without a public key - password login only")
@@ -427,6 +462,10 @@ func main() {
 			fatal("Could not use the restored Omarchy files: %v", err)
 		}
 		logf("using restored guest and runtime for this recovery launch")
+	}
+	snapshotRecovery, err := pinCheckpointBoot(cfg.dir, explicitFlags, release, sumsSHA256, runtimeRelease, runtimeSumsSHA256)
+	if err != nil {
+		fatal("Could not prepare the restored snapshot: %v", err)
 	}
 	completeAtStart := completeInstallExists(cfg.dir, filepath.Base(cfg.disk))
 	needsProvisioning := cfg.fresh || !completeAtStart
@@ -481,7 +520,7 @@ func main() {
 	// previous run must not be mistaken for this one's.
 	os.Remove(filepath.Join(cfg.vmDir, "qemu-stderr.log"))
 
-	if automaticUpdatesEnabled(cfg, *noUpdate, *release, *sumsSHA256) {
+	if !snapshotRecovery && automaticUpdatesEnabled(cfg, *noUpdate, *release, *sumsSHA256) {
 		checkDue := *updateURL != defaultUpdateURL || updateCheckDue(cfg.dir, time.Now())
 		if checkDue {
 			_ = recordUpdateCheck(cfg.dir, time.Now())
@@ -496,6 +535,13 @@ func main() {
 				return
 			}
 		}
+	}
+
+	if err := preparePortablePayloadTransition(cfg, *release, *sumsSHA256); err != nil {
+		if finishSetupCancellation(cfg, err) {
+			return
+		}
+		fatal("Could not preserve the portable disk before updating:\n\n%v", err)
 	}
 
 	// Machine setup the old bootstrap.ps1 handled: hypervisor on (may walk the
@@ -514,9 +560,9 @@ func main() {
 	const qemuExe = "qemu-system-x86_64w.exe"
 	stockQemu := `C:\Program Files\qemu\` + qemuExe
 	_, stockErr := os.Stat(stockQemu)
-	haveStock := stockErr == nil && !cfg.portable
+	haveStock := stockErr == nil && !cfg.portable && !snapshotRecovery && guestDisplayCount(cfg.displays) == 1
 	gpuRoot := ""
-	if !cfg.portable {
+	if !cfg.portable && !snapshotRecovery && guestDisplayCount(cfg.displays) == 1 {
 		_, err := os.Stat(filepath.Join(cfg.winqEmu, "bin", qemuExe))
 		if err == nil {
 			// A user-managed WINQ-EMU install stays under the user's control. Only
@@ -664,6 +710,7 @@ func main() {
 			conW, conH = p.consoleSize()
 		}
 	}
+	cfg.displayWidth, cfg.displayHeight = conW, conH
 	cmdline += fmt.Sprintf(" video=%dx%d", conW, conH)
 
 	reclaimDir.Store(&cfg.dir)
@@ -676,6 +723,12 @@ func main() {
 	go runCloseGuard()
 	runClipboardBridge()
 
+	if err := checkForwardBindings(cfg.forwards); err != nil {
+		fatal("Could not prepare port forwarding:\n\n%v", err)
+	}
+	if err := ensureLANFirewall(cfg); err != nil {
+		fatal("Could not prepare LAN forwarding:\n\n%v", err)
+	}
 	cfg.audio = "dsound"
 
 	for relaunch := true; relaunch; {
@@ -713,6 +766,11 @@ func supervise(cfg *config, cmdline string) bool {
 		logf("booting - %s (attempt %d)", mode, attempt)
 		pendingReboot.Store(false)
 		guestReady.Store(false)
+		controlDir, err := prepareQMPControl()
+		if err != nil {
+			fatal("Cannot prepare private VM controls: %v", err)
+		}
+		cfg.qmpDir = controlDir
 		proc = exec.Command(cfg.qemu, buildQemuArgs(cfg, cmdline)...)
 		// The w-binary's startup errors (bad args, SDL init) only ever reach
 		// stderr; without this they vanish and a dead QEMU is undebuggable.
@@ -727,7 +785,13 @@ func supervise(cfg *config, cmdline string) bool {
 		}
 		qemuPid.Store(uint32(proc.Process.Pid))
 		exited := make(chan error, 1)
-		go func() { exited <- proc.Wait() }()
+		go func() {
+			err := proc.Wait()
+			if err != nil {
+				logf("QEMU process exited with error: %v", err)
+			}
+			exited <- err
+		}()
 
 		// Do NOT touch QMP during early guest boot: a monitor connection in
 		// the first seconds reliably wedges QEMU's main loop under WHPX (the
@@ -746,6 +810,12 @@ func supervise(cfg *config, cmdline string) bool {
 				return false
 			case <-exited:
 				startupDead = true
+				if detail := qemuStartupFailureTail(cfg.vmDir); detail != "" {
+					logf("QEMU startup failure (attempt %d, %s):\n%s", attempt, mode, detail)
+				}
+				if forwardStartupProblem(cfg.vmDir) {
+					fatal("A configured port could not be opened. Another application may be using it, or the network adapter changed. Update the forward in Settings and try again.")
+				}
 				// The host refused nested virtualization for the partition
 				// (issue #19). Nothing else about the launch is wrong, so
 				// retry with the irqchip in QEMU, which never asks for it.
@@ -846,6 +916,7 @@ func watch(cfg *config, qmp *qmpConn, exited <-chan error) bool {
 		if guestReady.Swap(false) {
 			commitLauncherUpdate(cfg.dir)
 			commitPayloadUpdates(cfg.dir)
+			commitCheckpointBoot(cfg.dir)
 			recordRenderResult(cfg)
 			movedBootPending = true
 		}
@@ -862,6 +933,12 @@ func watch(cfg *config, qmp *qmpConn, exited <-chan error) bool {
 				break
 			}
 			silent = 0
+			if paths, ok := droppedFilesEvent(line); ok {
+				if err := sendDroppedFiles(paths); err != nil {
+					logf("file drop: %v", err)
+					go infoBox("These files could not be sent to Omarchy.\n\n" + err.Error())
+				}
+			}
 			if r := shutdownReason(line); r != "" {
 				reason = r
 			}
@@ -917,7 +994,11 @@ drained:
 		logf("guest rebooted - relaunching")
 		return true
 	}
-	logf("guest powered off (%s)", reason)
+	if reason == "" {
+		logf("QEMU exited without a guest shutdown event")
+	} else {
+		logf("guest powered off (%s)", reason)
+	}
 	return false
 }
 

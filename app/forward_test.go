@@ -11,10 +11,10 @@ import (
 
 func TestParseForwardAcceptsBothForms(t *testing.T) {
 	cases := map[string]portForward{
-		"tcp:2222:22":  {"tcp", 2222, 22},
-		"udp:5000:600": {"udp", 5000, 600},
-		"8080:80":      {"tcp", 8080, 80},
-		"TCP:1:65535":  {"tcp", 1, 65535},
+		"tcp:2222:22":  {"tcp", 2222, 22, ""},
+		"udp:5000:600": {"udp", 5000, 600, ""},
+		"8080:80":      {"tcp", 8080, 80, ""},
+		"TCP:1:65535":  {"tcp", 1, 65535, ""},
 	}
 	for in, want := range cases {
 		got, err := parseForward(in)
@@ -45,7 +45,7 @@ func TestForwardListRejectsDuplicateHostPortPerProtocol(t *testing.T) {
 }
 
 func TestForwardListReservesLauncherTCPPortsButNotUDP(t *testing.T) {
-	for port := qmpToolsPort; port <= lifecyclePort; port++ {
+	for port := qmpToolsPort; port <= transferPort; port++ {
 		var l forwardList
 		if err := l.Set(fmt.Sprintf("tcp:%d:80", port)); err == nil {
 			t.Fatalf("reserved TCP port %d accepted", port)
@@ -60,7 +60,7 @@ func TestNetdevArgBindsLoopbackOnly(t *testing.T) {
 	if got := netdevArg(nil); got != "user,id=n0" {
 		t.Fatalf("no forwards: %q", got)
 	}
-	got := netdevArg([]portForward{{"tcp", 2222, 22}, {"udp", 5000, 5000}})
+	got := netdevArg([]portForward{{"tcp", 2222, 22, ""}, {"udp", 5000, 5000, ""}})
 	want := "user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=udp:127.0.0.1:5000-:5000"
 	if got != want {
 		t.Fatalf("netdevArg = %q, want %q", got, want)
@@ -68,14 +68,14 @@ func TestNetdevArgBindsLoopbackOnly(t *testing.T) {
 }
 
 func TestSSHCmdlineOnlyForTCPForwardsToPort22(t *testing.T) {
-	if got := sshCmdline([]portForward{{"udp", 22, 22}, {"tcp", 8080, 80}}, "ssh-ed25519 AAAA x"); got != "" {
+	if got := sshCmdline([]portForward{{"udp", 22, 22, ""}, {"tcp", 8080, 80, ""}}, "ssh-ed25519 AAAA x"); got != "" {
 		t.Fatalf("non-ssh forwards requested sshd: %q", got)
 	}
-	if got := sshCmdline([]portForward{{"tcp", 2222, 22}}, ""); got != " tryomarchy.sshd=1" {
+	if got := sshCmdline([]portForward{{"tcp", 2222, 22, ""}}, ""); got != " tryomarchy.sshd=1" {
 		t.Fatalf("keyless request = %q", got)
 	}
 	key := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxTNqPU2EXAMPLEKEYEXAMPLEKEYEXAMPLEKEYEXAMPLE user@pc"
-	got := sshCmdline([]portForward{{"tcp", 2222, 22}}, key)
+	got := sshCmdline([]portForward{{"tcp", 2222, 22, ""}}, key)
 	prefix := " tryomarchy.sshd=1 tryomarchy.sshkey="
 	if !strings.HasPrefix(got, prefix) {
 		t.Fatalf("keyed request = %q", got)
@@ -112,7 +112,7 @@ func TestResolveSSHPresetCoversEveryDecision(t *testing.T) {
 		t.Fatalf("explicit key: key=%q err=%v", key, err)
 	}
 	// A forward to port 22 without -ssh still counts as an SSH request.
-	l = forwardList{{"tcp", 2299, 22}}
+	l = forwardList{{"tcp", 2299, 22, ""}}
 	if key, err = resolveSSHPreset(&l, 0, "", home, false); err != nil || key != good {
 		t.Fatalf("forward-only request: key=%q err=%v", key, err)
 	}
@@ -138,7 +138,7 @@ func TestResolveSSHPresetCoversEveryDecision(t *testing.T) {
 	if _, err = resolveSSHPreset(&l, 2222, filepath.Join(home, "missing.pub"), home, false); err == nil {
 		t.Fatal("missing key file accepted")
 	}
-	l = forwardList{{"tcp", 2222, 80}}
+	l = forwardList{{"tcp", 2222, 80, ""}}
 	if _, err = resolveSSHPreset(&l, 2222, "", home, false); err == nil {
 		t.Fatal("duplicate Windows port accepted")
 	}
@@ -193,5 +193,25 @@ func TestDefaultPublicKeyPrefersEd25519AndToleratesNone(t *testing.T) {
 	os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte(ed+"\n"), 0o600)
 	if got := defaultPublicKey(home); got != ed {
 		t.Fatalf("ed25519 preference = %q", got)
+	}
+}
+
+func TestLANForwardBindingsAndConflicts(t *testing.T) {
+	var forwards forwardList
+	for _, value := range []string{"tcp:127.0.0.1:8080:80", "tcp:192.168.1.5:8080:80", "udp:0.0.0.0:9000:9000"} {
+		if err := forwards.Set(value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := forwards.Set("tcp:0.0.0.0:8080:80"); err == nil {
+		t.Fatal("wildcard binding overlapped existing ports")
+	}
+	if !strings.Contains(netdevArg(forwards), "hostfwd=tcp:192.168.1.5:8080-:80") {
+		t.Fatal("lost explicit interface binding")
+	}
+	for _, value := range []string{"tcp:224.0.0.1:8080:80", "tcp:hostname:8080:80", "tcp:255.255.255.255:8080:80"} {
+		if _, err := parseForward(value); err == nil {
+			t.Fatal("accepted invalid interface address")
+		}
 	}
 }

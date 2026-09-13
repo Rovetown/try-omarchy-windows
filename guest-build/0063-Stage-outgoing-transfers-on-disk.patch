@@ -1,0 +1,83 @@
+From 74fcb162b5029655f1098e2cedc6f2dd6c6d2669 Mon Sep 17 00:00:00 2001
+From: Tyler South <tsouth2@gmail.com>
+Date: Sat, 12 Sep 2026 21:48:04 -0400
+Subject: [PATCH] Stage outgoing transfers on disk instead of runtime tmpfs
+
+---
+ .../usr/local/bin/file-transfer               | 12 +++++++--
+ guest/tests/test_file_transfer.py             | 26 +++++++++++++++++++
+ 2 files changed, 36 insertions(+), 2 deletions(-)
+
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer b/guest/factory-overlay/usr/local/bin/file-transfer
+index dff959b..2ca46af 100755
+--- a/guest/factory-overlay/usr/local/bin/file-transfer
++++ b/guest/factory-overlay/usr/local/bin/file-transfer
+@@ -305,10 +305,15 @@ def clipboard_selection_key(paths):
+     return digest.hexdigest()
+ 
+ 
+-def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
++def transfer_cache():
+     cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'try-omarchy-transfers'
+     plain_path(cache)
+     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
++    return cache
++
++
++def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
++    cache = transfer_cache()
+     destination = cache / ('received-' + os.urandom(16).hex())
+     result = download(ticket, destination, host, port)
+     paths = [Path(path) for path in result['paths']]
+@@ -331,7 +336,10 @@ def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448, purp
+     marker = state / 'last_file_selection'
+     if purpose == 'clipboard' and marker.exists() and marker.read_text() == key:
+         return {'state': 'unchanged'}
+-    with tempfile.TemporaryDirectory(prefix='transfer-', dir=state) as temporary:
++    # Runtime state is usually a small tmpfs. Keep archive data on the same
++    # disk cache as received files, preserving the runtime directory for locks
++    # and small clipboard markers only.
++    with tempfile.TemporaryDirectory(prefix='transfer-', dir=transfer_cache()) as temporary:
+         archive = Path(temporary) / 'selection.zip'
+         offer = pack(paths, archive)
+         with socket.create_connection((host, push_port), timeout=10) as control:
+diff --git a/guest/tests/test_file_transfer.py b/guest/tests/test_file_transfer.py
+index 3ed3142..ebabac1 100644
+--- a/guest/tests/test_file_transfer.py
++++ b/guest/tests/test_file_transfer.py
+@@ -14,6 +14,32 @@ loader.exec_module(transfer)
+ 
+ 
+ class StreamingFileTests(unittest.TestCase):
++    def test_outgoing_archive_uses_disk_cache_when_runtime_storage_is_small(self):
++        from types import SimpleNamespace
++        from unittest import mock
++        for purpose in ('clipboard', 'drop'):
++            with self.subTest(purpose=purpose), tempfile.TemporaryDirectory() as tmp:
++                root = Path(tmp)
++                state = root / 'runtime'
++                state.mkdir()
++                source = root / 'source'
++                source.write_bytes(b'original contents')
++                cache = root / 'cache'
++                checked = []
++                def space(path):
++                    checked.append(Path(path))
++                    return SimpleNamespace(free=(128 << 20) if Path(path).is_relative_to(state) else (4 << 30))
++                with mock.patch.dict(transfer.os.environ, {'XDG_CACHE_HOME': str(cache)}), \
++                     mock.patch.object(transfer.shutil, 'disk_usage', side_effect=space), \
++                     mock.patch.object(transfer.socket, 'create_connection', side_effect=ConnectionRefusedError):
++                    with self.assertRaises(ConnectionRefusedError):
++                        transfer.clipboard_send((source.as_uri() + '\n').encode(), state, purpose=purpose)
++                self.assertTrue(checked)
++                self.assertTrue(all(path.is_relative_to(cache) for path in checked))
++                self.assertEqual(list(state.iterdir()), [])
++                self.assertEqual(list((cache / 'try-omarchy-transfers').iterdir()), [])
++                self.assertEqual(source.read_bytes(), b'original contents')
++
+     def test_large_round_trip(self):
+         with tempfile.TemporaryDirectory() as tmp:
+             root = Path(tmp)
+-- 
+2.55.0
+

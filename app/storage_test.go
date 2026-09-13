@@ -57,7 +57,7 @@ func TestStoragePreferencesRejectCorruption(t *testing.T) {
 	}
 }
 
-func TestRequestedCapacityAndPortableGuard(t *testing.T) {
+func TestRequestedCapacityAcrossStorageModes(t *testing.T) {
 	for _, tc := range []struct {
 		requested int
 		portable  bool
@@ -67,7 +67,7 @@ func TestRequestedCapacityAndPortableGuard(t *testing.T) {
 		{0, false, 24 * 1024, false}, {64, false, 64 * 1024, false},
 		{24, false, 24 * 1024, false}, {1024, false, 1024 * 1024, false},
 		{-1, false, 0, true}, {23, false, 0, true}, {1025, false, 0, true},
-		{0, true, 24 * 1024, false}, {64, true, 0, true},
+		{0, true, 24 * 1024, false}, {64, true, 64 * 1024, false},
 	} {
 		got, err := requestedDiskMiB(24*1024, tc.requested, tc.portable)
 		if (err != nil) != tc.bad || (!tc.bad && got != tc.want) {
@@ -133,7 +133,7 @@ func TestInvalidCapacityCannotResetDisk(t *testing.T) {
 		}
 		size := -1
 		if portable {
-			size = 64
+			size = maximumDiskGiB + 1
 		}
 		cfg := &config{dir: root, disk: disk, fresh: true, portable: portable, diskGiB: size}
 		if err := prepareDisk(cfg, 24*1024); err == nil {

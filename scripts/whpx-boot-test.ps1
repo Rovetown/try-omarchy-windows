@@ -20,7 +20,7 @@ Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -For
 $qemuArgs = @(
     '-machine','q35','-accel','whpx','-cpu','qemu64','-m','2048','-smp','2',
     '-cdrom',$iso,'-device','VGA','-display','none',
-    '-qmp','tcp:127.0.0.1:4444,server=on,wait=off',
+    '-qmp','tcp:127.0.0.1:4444,server=on,wait=off','-nic','none',
     '-serial',"file:$wd\serial.log"
 )
 $p = Start-Process -FilePath 'C:\Program Files\qemu\qemu-system-x86_64.exe' `

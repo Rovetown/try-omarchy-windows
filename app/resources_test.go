@@ -38,10 +38,10 @@ func TestPickGuestMemScalesWithTheMachine(t *testing.T) {
 func TestGPUHostMemFollowsGuestAndHost(t *testing.T) {
 	for _, c := range []struct {
 		mem, total int
-		want       string
-	}{{2048, 8192, "1G"}, {3072, 8192, "2G"}, {4096, 16384, "4G"}, {8192, 16384, "4G"}, {8192, 32768, "4G"}, {10240, 65536, "4G"}} {
+		want       uint64
+	}{{2048, 8192, 1 << 30}, {3072, 8192, 2 << 30}, {4096, 16384, 4 << 30}, {8192, 16384, 4 << 30}, {8192, 32768, 4 << 30}, {10240, 65536, 4 << 30}} {
 		if got := gpuHostMem(c.mem, c.total); got != c.want {
-			t.Errorf("mem %d total %d: got %s, want %s", c.mem, c.total, got, c.want)
+			t.Errorf("mem %d total %d: got %d, want %d", c.mem, c.total, got, c.want)
 		}
 	}
 }

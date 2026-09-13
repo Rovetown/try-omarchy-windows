@@ -54,3 +54,26 @@ func TestWindowsFileClipboardNative(t *testing.T) {
 		t.Fatal("file-to-text transition failed")
 	}
 }
+
+func TestWindowsStreamingClipboardPaths(t *testing.T) {
+	if os.Getenv("TRY_OMARCHY_TEST_CLIPBOARD") != "1" {
+		t.Skip("requires disposable clipboard desktop")
+	}
+	source := filepath.Join(t.TempDir(), "large 世界.txt")
+	contents := bytes.Repeat([]byte("files"), 4<<20)
+	if err := os.WriteFile(source, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !clipboardSetFilePaths([]string{source}) {
+		t.Fatal("could not publish streamed paths")
+	}
+	defer clipboardSetItem(textItem("after streaming files"))
+	paths, ok := clipboardGetFilePaths()
+	if !ok || len(paths) != 1 || paths[0] != source {
+		t.Fatal(paths, ok)
+	}
+	content, err := os.ReadFile(paths[0])
+	if err != nil || !bytes.Equal(content, contents) {
+		t.Fatal("streaming clipboard changed file", err)
+	}
+}

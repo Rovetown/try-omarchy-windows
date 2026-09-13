@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -47,19 +48,26 @@ func inspectClipboardArchive(data []byte) (*zip.Reader, error) {
 	if len(data) == 0 || len(data) > maxClipboardArchiveBytes {
 		return nil, fmt.Errorf("file selection exceeds the 16 MiB clipboard limit; use the shared folder")
 	}
-	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	return inspectFileArchive(bytes.NewReader(data), int64(len(data)), maxClipboardFileEntries, maxClipboardFileBytes)
+}
+
+func inspectFileArchive(reader io.ReaderAt, archiveBytes int64, maxEntries int, maxBytes uint64) (*zip.Reader, error) {
+	if err := validateTransferZipDirectory(reader, archiveBytes, maxEntries); err != nil {
+		return nil, err
+	}
+	z, err := zip.NewReader(reader, archiveBytes)
 	if err != nil {
 		return nil, err
 	}
-	if len(z.File) == 0 || len(z.File) > maxClipboardFileEntries {
-		return nil, fmt.Errorf("clipboard supports 1 to %d entries", maxClipboardFileEntries)
+	if len(z.File) == 0 || len(z.File) > maxEntries {
+		return nil, fmt.Errorf("transfer supports 1 to %d entries", maxEntries)
 	}
 	seen := map[string]bool{}
 	spelling := map[string]string{}
 	var size uint64
 	for _, f := range z.File {
 		name := strings.TrimSuffix(f.Name, "/")
-		if !clipboardFileName(f.Name) || (f.Mode().Type() != 0 && !f.FileInfo().IsDir()) || f.Flags&1 != 0 {
+		if len(f.Extra) > 4096 || len(f.Comment) > 4096 || !clipboardFileName(f.Name) || (f.Mode().Type() != 0 && !f.FileInfo().IsDir()) || f.Flags&1 != 0 || (f.FileInfo().IsDir() && f.UncompressedSize64 != 0) {
 			return nil, fmt.Errorf("unsupported clipboard file name or type")
 		}
 		for prefix := name; prefix != "."; prefix = path.Dir(prefix) {
@@ -74,8 +82,8 @@ func inspectClipboardArchive(data []byte) (*zip.Reader, error) {
 			return nil, fmt.Errorf("duplicate clipboard name")
 		}
 		seen[key] = f.FileInfo().IsDir()
-		if f.UncompressedSize64 > maxClipboardFileBytes || size > maxClipboardFileBytes-f.UncompressedSize64 {
-			return nil, fmt.Errorf("clipboard files exceed 64 MiB")
+		if f.UncompressedSize64 > maxBytes || size > maxBytes-f.UncompressedSize64 {
+			return nil, fmt.Errorf("files exceed the transfer size limit")
 		}
 		size += f.UncompressedSize64
 	}
@@ -99,18 +107,35 @@ func (b *clipboardArchiveBuffer) Write(p []byte) (int, error) {
 }
 
 func packClipboardFiles(paths []string) ([]byte, error) {
-	if len(paths) == 0 || len(paths) > maxClipboardFileEntries {
-		return nil, fmt.Errorf("too many clipboard files")
-	}
 	var out clipboardArchiveBuffer
-	z := zip.NewWriter(&out)
+	limits := fileTransferLimits{Entries: maxClipboardFileEntries, Bytes: maxClipboardFileBytes, ArchiveBytes: maxClipboardArchiveBytes}
+	if err := writeFilesArchive(context.Background(), &out, paths, limits, false, nil); err != nil {
+		return nil, err
+	}
+	if _, err := inspectClipboardArchive(out.Bytes()); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func writeFilesArchive(ctx context.Context, output io.Writer, paths []string, limits fileTransferLimits, preserveMetadata bool, report func(int64)) error {
+	if !limits.valid() || len(paths) == 0 || len(paths) > limits.Entries {
+		return fmt.Errorf("invalid file selection or transfer limits")
+	}
+	z := zip.NewWriter(output)
 	count := 0
 	var total int64
 	for _, source := range paths {
 		source = filepath.Clean(source)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := validateMovePath(source); err != nil {
+			return err
+		}
 		root, err := os.OpenRoot(filepath.Dir(source))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		err = func() error {
 			defer root.Close()
@@ -119,8 +144,11 @@ func packClipboardFiles(paths []string) ([]byte, error) {
 				if walkErr != nil {
 					return walkErr
 				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				count++
-				if count > maxClipboardFileEntries {
+				if count > limits.Entries {
 					return fmt.Errorf("too many clipboard entries")
 				}
 				if !clipboardFileName(name) {
@@ -134,11 +162,18 @@ func packClipboardFiles(paths []string) ([]byte, error) {
 					return fmt.Errorf("links and special files must be copied through the shared folder")
 				}
 				header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+				if preserveMetadata {
+					header.Modified = info.ModTime()
+				}
 				if info.IsDir() {
 					header.Name += "/"
 					header.SetMode(0700 | os.ModeDir)
 				} else {
-					header.SetMode(0600)
+					mode := os.FileMode(0600)
+					if preserveMetadata {
+						mode |= info.Mode() & 0100
+					}
+					header.SetMode(mode)
 				}
 				w, err := z.CreateHeader(header)
 				if err != nil {
@@ -159,28 +194,32 @@ func packClipboardFiles(paths []string) ([]byte, error) {
 				if !actual.Mode().IsRegular() || !os.SameFile(info, actual) {
 					return fmt.Errorf("clipboard source changed during copy")
 				}
-				n, err := io.Copy(w, io.LimitReader(f, maxClipboardFileBytes-total+1))
+				n, err := io.Copy(w, &transferReader{ctx: ctx, reader: io.LimitReader(f, limits.Bytes-total+1), progress: report})
 				total += n
 				if err != nil {
 					return err
 				}
-				if total > maxClipboardFileBytes {
-					return fmt.Errorf("clipboard files exceed 64 MiB; use the shared folder")
+				if total > limits.Bytes {
+					return fmt.Errorf("files exceed the transfer size limit")
+				}
+				after, err := f.Stat()
+				if err != nil {
+					return err
+				}
+				if n != actual.Size() || after.Size() != actual.Size() || !after.ModTime().Equal(actual.ModTime()) {
+					return fmt.Errorf("source file changed during transfer")
 				}
 				return nil
 			})
 		}()
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := z.Close(); err != nil {
-		return nil, err
+		return err
 	}
-	if _, err := inspectClipboardArchive(out.Bytes()); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
+	return nil
 }
 
 func unpackClipboardFiles(data []byte, cache string) (paths []string, err error) {

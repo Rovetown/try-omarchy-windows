@@ -41,6 +41,11 @@ func backupNameAllowed(name string) bool {
 			return false
 		}
 	}
+	for index := 0; index < maximumGuestDisplays; index++ {
+		if name == displayPlacementFilename(index) {
+			return true
+		}
+	}
 	return name == "vm/disk.raw" || name == "settings.json" || name == storageSettingsFilename || strings.HasPrefix(name, "guest/") || strings.HasPrefix(name, "runtime/")
 }
 
@@ -60,6 +65,12 @@ func writeVMBackup(dir, destination string) error {
 }
 
 func writeVMBackupProgress(dir, destination string, report backupProgress) error {
+	return writeVMArchive(dir, destination, report, false)
+}
+
+// Internal checkpoints have a private staging directory excluded from the
+// archive inventory. Public backups still require an external destination.
+func writeVMArchive(dir, destination string, report backupProgress, checkpoint bool) error {
 	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err
@@ -78,7 +89,9 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 	}
 	rel, err := filepath.Rel(root, parent)
 	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("save the backup outside the Try Omarchy data folder")
+		if !checkpoint || filepath.Base(destination) != "vm.zip" || filepath.Dir(rel) != "checkpoints" || !strings.HasPrefix(filepath.Base(rel), ".pending-") || !validCheckpointID(strings.TrimPrefix(filepath.Base(rel), ".pending-")) {
+			return fmt.Errorf("save the backup outside the Try Omarchy data folder")
+		}
 	}
 
 	for _, name := range []string{payloadUpdateStateFilename, updateStateFilename} {
@@ -86,7 +99,19 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 			return fmt.Errorf("finish the pending update before backing up")
 		}
 	}
-	disk, err := openBackupDisk(filepath.Join(dir, "vm", "disk.raw"))
+	inventory, err := inspectInstallationDisk(dir)
+	if err != nil {
+		return err
+	}
+	if inventory.Format == "qcow2" && report != nil {
+		report(0, inventory.VirtualBytes, "Preparing portable disk")
+	}
+	diskPath, cleanup, err := materializeInstallationDisk(dir, filepath.Dir(destination), inventory)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	disk, err := openBackupDisk(diskPath)
 	if err != nil {
 		return fmt.Errorf("close Try Omarchy before backing up: %w", err)
 	}
@@ -94,8 +119,15 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 	var entries []backupEntry
 	seen := map[string]bool{}
 	var total int64
-	for _, root := range []string{"guest", "runtime", "vm/disk.raw", "settings.json", storageSettingsFilename} {
+	roots := []string{"guest", "runtime", "vm/disk.raw", "settings.json", storageSettingsFilename}
+	for index := 0; index < maximumGuestDisplays; index++ {
+		roots = append(roots, displayPlacementFilename(index))
+	}
+	for _, root := range roots {
 		full := filepath.Join(dir, filepath.FromSlash(root))
+		if root == "vm/disk.raw" {
+			full = diskPath
+		}
 		if _, err := os.Lstat(full); os.IsNotExist(err) {
 			continue
 		}
@@ -110,11 +142,14 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 			if err != nil {
 				return err
 			}
-			rel, err := filepath.Rel(dir, name)
-			if err != nil {
-				return err
+			rel := root
+			if root != "vm/disk.raw" {
+				rel, err = filepath.Rel(dir, name)
+				if err != nil {
+					return err
+				}
+				rel = filepath.ToSlash(rel)
 			}
-			rel = filepath.ToSlash(rel)
 			if !info.Mode().IsRegular() || !backupNameAllowed(rel) {
 				return fmt.Errorf("cannot back up unsupported file %s", rel)
 			}
@@ -205,6 +240,10 @@ func writeVMBackupProgress(dir, destination string, report backupProgress) error
 }
 
 func readVMBackup(z *zip.ReadCloser) (backupManifest, map[string]*zip.File, error) {
+	return readVMBackupReader(&z.Reader)
+}
+
+func readVMBackupReader(z *zip.Reader) (backupManifest, map[string]*zip.File, error) {
 	var manifest backupManifest
 	files := map[string]*zip.File{}
 	names := map[string]bool{}
@@ -277,7 +316,14 @@ func restoreVMBackupProgress(source, destination string, report backupProgress) 
 		return err
 	}
 	defer z.Close()
-	manifest, files, err := readVMBackup(z)
+	return restoreVMBackupReader(&z.Reader, destination, report)
+}
+
+func restoreVMBackupReader(z *zip.Reader, destination string, report backupProgress) error {
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		return fmt.Errorf("restore requires a new data folder; the existing folder was not changed")
+	}
+	manifest, files, err := readVMBackupReader(z)
 	if err != nil {
 		return err
 	}

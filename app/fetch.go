@@ -101,7 +101,7 @@ func ensureGuestFiles(cfg *config, release, sumsSHA256 string) error {
 		var installErr error
 		if cfg.portable {
 			status = fmt.Sprintf("Checking portable Omarchy (%d of %d)...", i+1, len(downloadedGuestArtifacts)+1)
-			installErr = ensureVerifiedPortableCopy(filepath.Join(cfg.payloadDir, name), dest, sums[name], status, ui)
+			installErr = ensureVerifiedPortableCopy(filepath.Join(portablePayloadDirectory(cfg.payloadDir, sumsSHA256), name), dest, sums[name], status, ui)
 		} else {
 			installErr = ensureVerifiedDownload(client, normalizedRelease(release)+"/"+name, dest, sums[name], status, ui)
 		}
@@ -117,7 +117,7 @@ func ensureGuestFiles(cfg *config, release, sumsSHA256 string) error {
 	zst := filepath.Join(cfg.guestDir, "rootfs.ext4.zst")
 	removeZst := true
 	if cfg.portable {
-		zst = filepath.Join(cfg.payloadDir, "rootfs.ext4.zst")
+		zst = filepath.Join(portablePayloadDirectory(cfg.payloadDir, sumsSHA256), "rootfs.ext4.zst")
 		removeZst = false
 	}
 	rootfs := filepath.Join(cfg.guestDir, "rootfs.ext4")

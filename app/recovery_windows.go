@@ -7,10 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"syscall"
 	"time"
 )
 
@@ -39,6 +36,25 @@ func beginRecoveryProgress(status string) {
 func runRecoveryUI(dir, action string) error {
 	configureSetupCancellation(false)
 	switch action {
+	case "portable-create":
+		parent, ok, err := chooseRecoveryPath(0, "Choose where to create the portable copy", "", false, true)
+		if err != nil || !ok {
+			return err
+		}
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(parent, "OmarchyPortable-"+time.Now().Format("20060102-150405"))
+		beginRecoveryProgress("Creating your portable copy...")
+		err = createPortableCopy(dir, destination, self, recoveryProgress("Copying"))
+		uiDone()
+		if err != nil {
+			return err
+		}
+		infoBox("Portable copy created at:\n\n" + destination + "\n\nOpen Start Omarchy.cmd in that folder. Your original installation was kept.")
+	case "snapshots":
+		return runCheckpointUI(dir)
 	case "move", "move-cleanup":
 		return runMoveUI(dir, action == "move-cleanup")
 	case "backup":
@@ -159,15 +175,19 @@ func createRestoredLaunchers(dir string) error {
 	if err != nil {
 		return err
 	}
-	const script = `$ErrorActionPreference='Stop'; $shell=New-Object -ComObject WScript.Shell; ` +
-		`$items=@(@('Start Omarchy.lnk',$env:TRYOMARCHY_RESTORE_ARGS),@('Settings.lnk',($env:TRYOMARCHY_RESTORE_ARGS+' -settings'))); ` +
-		`foreach($item in $items){$path=Join-Path $env:TRYOMARCHY_RESTORE_DIR $item[0]; if(Test-Path -LiteralPath $path){throw 'Shortcut already exists'}; ` +
-		`$link=$shell.CreateShortcut($path); $link.TargetPath=$env:TRYOMARCHY_RESTORE_TARGET; $link.Arguments=$item[1]; $link.WorkingDirectory=$env:TRYOMARCHY_RESTORE_DIR; $link.IconLocation=$env:TRYOMARCHY_RESTORE_TARGET+',0'; $link.Save()}`
-	cmd := exec.Command(system32("WindowsPowerShell\\v1.0\\powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "TRYOMARCHY_RESTORE_DIR="+dir, "TRYOMARCHY_RESTORE_TARGET="+target, "TRYOMARCHY_RESTORE_ARGS="+shortcutArguments(dir))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("creating restored shortcuts: %w: %s", err, strings.TrimSpace(string(output)))
+	for _, item := range []struct{ name, arguments string }{
+		{"Start Omarchy.lnk", shortcutArguments(dir)},
+		{"Settings.lnk", settingsShortcutArguments(dir)},
+	} {
+		path := filepath.Join(dir, item.name)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("shortcut already exists: %s", path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := writeShellLink(path, target, item.arguments, dir); err != nil {
+			return err
+		}
 	}
 	return recordShortcutOffer(dir)
 }
@@ -182,4 +202,42 @@ func recoveryProgress(action string) backupProgress {
 		}
 		ui.setProgress(current, total)
 	}
+}
+
+// A retained portable disk still uses its relative guest backing path. Keep
+// that layout and provide a portable launcher in the enclosing recovery bundle.
+func createRollbackRecoveryLaunchers(dir, sourceInstallation string) error {
+	disk, err := inspectInstallationDisk(dir)
+	if err != nil {
+		return err
+	}
+	if disk.Format == "raw" {
+		return createRestoredLaunchers(dir)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	root := filepath.Dir(dir)
+	if err := copyLauncher(self, filepath.Join(root, stableLauncherName), replaceLauncher); err != nil {
+		return err
+	}
+	arguments, err := preparePortableRecoveryPayload(dir, filepath.Join(filepath.Dir(sourceInstallation), "payload"))
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"Start Omarchy.cmd", "Settings.cmd"} {
+		args := append([]string(nil), arguments...)
+		if name == "Settings.cmd" {
+			args = append(args, "-settings")
+		}
+		command, err := portableRecoveryCommand(args)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(command), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
 }

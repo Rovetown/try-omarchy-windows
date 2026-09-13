@@ -1,5 +1,9 @@
 # Next release plan
 
+Historical September 6 planning snapshot. The current release assessment and
+continuation instructions are in [SESSION-RESUME.md](SESSION-RESUME.md). Do not
+select v0.0.15 from this document; later draft candidates already exist.
+
 Proposed target: **v0.0.15-preview**, following v0.0.14-preview at `7fb4fb1`.
 Planning snapshot: 2026-09-06. Confirm the next available version before tagging.
 This document proposes work; it does not claim implementation or validation.

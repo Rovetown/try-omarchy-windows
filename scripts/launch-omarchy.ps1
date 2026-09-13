@@ -25,6 +25,7 @@ param(
                          # In-guest: sudo mount -t 9p -o trans=virtio hostshare /mnt/host
 )
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\qmp-transport.ps1"
 $QmpToolsPort = 4445   # free for qmp.ps1 / provisioning tooling
 $QmpFwdPort   = 4446   # winkey-forwarder
 $QmpSupPort   = 4447   # this script's watchdog + lifecycle supervision
@@ -88,9 +89,9 @@ $qemuArgs = @(
     '-device', 'virtio-net-pci,netdev=n0', '-netdev', 'user,id=n0',
     '-device', 'virtio-rng-pci',
     '-device', 'virtio-sound-pci',
-    '-qmp', "tcp:127.0.0.1:$QmpToolsPort,server=on,wait=off",
-    '-qmp', "tcp:127.0.0.1:$QmpFwdPort,server=on,wait=off",
-    '-qmp', "tcp:127.0.0.1:$QmpSupPort,server=on,wait=off",
+    '-qmp', "unix:$((Get-OmarchyQmpPath $QmpToolsPort).Replace(',',',,')),server=on,wait=off",
+    '-qmp', "unix:$((Get-OmarchyQmpPath $QmpFwdPort).Replace(',',',,')),server=on,wait=off",
+    '-qmp', "unix:$((Get-OmarchyQmpPath $QmpSupPort).Replace(',',',,')),server=on,wait=off",
     '-D', (Join-Path $vm 'qemu.log'),
     # In-guest reboot/poweroff wedges upstream WHPX (vCPUs never return from system
     # reset). Exit instead; the supervisor loop below relaunches on guest reset.
@@ -137,20 +138,17 @@ Add-Type -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dl
 
 function Connect-Qmp([int]$port, [int]$readTimeoutMs) {
     # Full handshake (greeting + qmp_capabilities). Returns $null unless QEMU's main
-    # loop actually answers - a wedged QEMU accepts the TCP connect but never talks.
-    $tcp = New-Object Net.Sockets.TcpClient
+    # loop actually answers - a wedged QEMU accepts a socket connection but never talks.
+    $s = $null
     try {
-        $iar = $tcp.BeginConnect('127.0.0.1', $port, $null, $null)
-        if (-not $iar.AsyncWaitHandle.WaitOne(3000)) { $tcp.Close(); return $null }
-        $tcp.EndConnect($iar)
-        $s = $tcp.GetStream(); $s.ReadTimeout = $readTimeoutMs
+        $s = New-OmarchyQmpStream $port; $s.ReadTimeout = $readTimeoutMs
         $r = New-Object IO.StreamReader($s)
         $w = New-Object IO.StreamWriter($s); $w.AutoFlush = $true
-        if ($null -eq $r.ReadLine()) { $tcp.Close(); return $null }   # greeting
+        if ($null -eq $r.ReadLine()) { $s.Close(); return $null }
         $w.WriteLine('{"execute":"qmp_capabilities"}')
-        if ($null -eq $r.ReadLine()) { $tcp.Close(); return $null }   # {"return":{}}
-        return @{ Tcp = $tcp; Reader = $r; Writer = $w }
-    } catch { $tcp.Close(); return $null }
+        if ($null -eq $r.ReadLine()) { $s.Close(); return $null }
+        return @{ Tcp = $s; Reader = $r; Writer = $w }
+    } catch { if($s){$s.Close()}; return $null }
 }
 
 # SDL's keyboard grab installs a system-wide Win-key hook that leaks past window
@@ -174,6 +172,7 @@ try {
         $qmp = $null
         for ($attempt = 1; $attempt -le 4; $attempt++) {
             Write-Host "Booting Omarchy - $mode (Ctrl+Alt+G toggles mouse grab, Ctrl+Alt+F fullscreen)..."
+            Initialize-OmarchyQmpControl
             $proc = Start-Process -FilePath $qemu -ArgumentList $argStr -PassThru
             $deadline = (Get-Date).AddSeconds(30)
             while ($null -eq $qmp -and (Get-Date) -lt $deadline -and -not $proc.HasExited) {

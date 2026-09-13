@@ -1,0 +1,184 @@
+From 61c4d07a3bb4cbc827561b8fbb2df950774eb63c Mon Sep 17 00:00:00 2001
+From: btsouth <btsouth@users.noreply.github.com>
+Date: Sat, 12 Sep 2026 18:57:05 -0400
+Subject: [PATCH] Add guest clients for verified file transfers
+
+---
+ .../usr/local/bin/file-transfer               | 93 +++++++++++++++++--
+ guest/tests/test_file_transfer.py             | 35 +++++++
+ 2 files changed, 122 insertions(+), 6 deletions(-)
+
+diff --git a/guest/factory-overlay/usr/local/bin/file-transfer b/guest/factory-overlay/usr/local/bin/file-transfer
+index 89adbc0..259c076 100755
+--- a/guest/factory-overlay/usr/local/bin/file-transfer
++++ b/guest/factory-overlay/usr/local/bin/file-transfer
+@@ -4,6 +4,7 @@ import argparse
+ import ctypes
+ import datetime
+ import hashlib
++import http.client
+ import importlib.machinery
+ import importlib.util
+ import json
+@@ -186,6 +187,80 @@ def receive(input, offer, destination):
+                 return {'paths': [str(destination / name) for name in roots]}
+ 
+ 
++def read_metadata(path):
++    with path.open('rb') as metadata:
++        data = metadata.read(4097)
++    if len(data) > 4096:
++        raise ValueError('Transfer metadata is too large')
++    return json.loads(data)
++
++
++def valid_ticket(ticket, direction):
++    if not isinstance(ticket, dict) or set(ticket) != {'id', 'token', 'direction', 'offer'}:
++        return False
++    for name, length in (('id', 32), ('token', 64)):
++        value = ticket[name]
++        if not isinstance(value, str) or len(value) != length or any(c not in '0123456789abcdef' for c in value):
++            return False
++    return ticket['direction'] == direction and valid_offer(ticket['offer'])
++
++
++def download(ticket, destination, host='10.0.2.2', port=4452):
++    if not valid_ticket(ticket, 'download'):
++        raise ValueError('Invalid download ticket')
++    connection = http.client.HTTPConnection(host, port, timeout=30)
++    try:
++        connection.request('GET', '/download/' + ticket['token'])
++        response = connection.getresponse()
++        if response.status != 200 or response.getheader('Content-Length') != str(ticket['offer']['archiveBytes']):
++            raise ValueError('Download is unavailable or changed')
++        return receive(response, ticket['offer'], destination)
++    finally:
++        connection.close()
++
++
++def upload_completed(ticket, host, port):
++    connection = http.client.HTTPConnection(host, port, timeout=30)
++    try:
++        connection.request('GET', '/upload/' + ticket['token'])
++        response = connection.getresponse()
++        data = response.read(4097)
++        if response.status != 200 or len(data) > 4096:
++            return False
++        status = json.loads(data)
++        return isinstance(status, dict) and status.get('state') == 'completed'
++    finally:
++        connection.close()
++
++
++def upload(ticket, archive, host='10.0.2.2', port=4452):
++    if not valid_ticket(ticket, 'upload'):
++        raise ValueError('Invalid upload ticket')
++    if upload_completed(ticket, host, port):
++        return {'state': 'completed', 'id': ticket['id']}
++    plain_path(archive)
++    fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW)
++    with os.fdopen(fd, 'rb') as data:
++        if offer_for(data) != ticket['offer']:
++            raise ValueError('Prepared transfer changed')
++        data.seek(0)
++        connection = http.client.HTTPConnection(host, port, timeout=30)
++        try:
++            connection.request('POST', '/upload/' + ticket['token'], body=data,
++                               headers={'Content-Type': 'application/zip',
++                                        'Content-Length': str(ticket['offer']['archiveBytes'])})
++            response = connection.getresponse()
++            if response.status != 204:
++                raise ValueError('Upload did not complete; retry with the same ticket')
++            return {'state': 'completed', 'id': ticket['id']}
++        except (OSError, http.client.HTTPException):
++            if upload_completed(ticket, host, port):
++                return {'state': 'completed', 'id': ticket['id']}
++            raise
++        finally:
++            connection.close()
++
++
+ def main():
+     parser = argparse.ArgumentParser()
+     sub = parser.add_subparsers(dest='command', required=True)
+@@ -195,15 +270,21 @@ def main():
+     receiver = sub.add_parser('receive')
+     receiver.add_argument('--offer', required=True, type=Path)
+     receiver.add_argument('--destination', required=True, type=Path)
++    for name in ('download', 'upload'):
++        client = sub.add_parser(name)
++        client.add_argument('--ticket', required=True, type=Path)
++        client.add_argument('--host', default='10.0.2.2')
++        client.add_argument('--port', default=4452, type=int)
++        client.add_argument('--destination' if name == 'download' else '--archive', required=True, type=Path)
+     args = parser.parse_args()
+     if args.command == 'pack':
+         result = pack(args.paths, args.archive)
++    elif args.command == 'receive':
++        result = receive(sys.stdin.buffer, read_metadata(args.offer), args.destination)
++    elif args.command == 'download':
++        result = download(read_metadata(args.ticket), args.destination, args.host, args.port)
+     else:
+-        with args.offer.open('rb') as metadata:
+-            data = metadata.read(4097)
+-        if len(data) > 4096:
+-            raise ValueError('Transfer offer is too large')
+-        result = receive(sys.stdin.buffer, json.loads(data), args.destination)
++        result = upload(read_metadata(args.ticket), args.archive, args.host, args.port)
+     print(json.dumps(result))
+ 
+ 
+@@ -215,6 +296,6 @@ if __name__ == '__main__':
+     signal.signal(signal.SIGTERM, interrupt)
+     try:
+         main()
+-    except (ValueError, OSError, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
++    except (ValueError, OSError, http.client.HTTPException, zipfile.BadZipFile, zlib.error, UnicodeError, KeyboardInterrupt) as error:
+         print(f'File transfer: {error or "cancelled"}', file=sys.stderr)
+         sys.exit(1)
+diff --git a/guest/tests/test_file_transfer.py b/guest/tests/test_file_transfer.py
+index be0bbce..6073f64 100644
+--- a/guest/tests/test_file_transfer.py
++++ b/guest/tests/test_file_transfer.py
+@@ -114,3 +114,38 @@ class StreamingFileTests(unittest.TestCase):
+                 struct.pack_into('<Q', data, len(data) - 22 - 20 - 56 + 40, 1 << 40)
+             with self.subTest(field=field), self.assertRaises(ValueError):
+                 transfer.inspect(io.BytesIO(data))
++
++    def test_ticket_rejects_wrong_direction_and_paths(self):
++        offer = {'version': 1, 'archiveBytes': 100, 'fileBytes': 1, 'entries': 1, 'sha256': 'a' * 64}
++        ticket = {'id': 'b' * 32, 'token': 'c' * 64, 'direction': 'download', 'offer': offer}
++        self.assertTrue(transfer.valid_ticket(ticket, 'download'))
++        self.assertFalse(transfer.valid_ticket(ticket, 'upload'))
++        for name, value in [('token', '../file'), ('id', 1), ('offer', {}), ('destination', '/tmp/unwanted')]:
++            changed = dict(ticket)
++            changed[name] = value
++            self.assertFalse(transfer.valid_ticket(changed, 'download'))
++
++    def test_download_never_follows_redirect(self):
++        import http.server
++        import threading
++        class Redirect(http.server.BaseHTTPRequestHandler):
++            def do_GET(self):
++                self.send_response(302)
++                self.send_header('Location', 'http://127.0.0.1:1/private')
++                self.end_headers()
++            def log_message(self, *_):
++                pass
++        with http.server.HTTPServer(('127.0.0.1', 0), Redirect) as server:
++            worker = threading.Thread(target=server.serve_forever)
++            worker.start()
++            try:
++                offer = {'version': 1, 'archiveBytes': 100, 'fileBytes': 1, 'entries': 1, 'sha256': 'a' * 64}
++                ticket = {'id': 'b' * 32, 'token': 'c' * 64, 'direction': 'download', 'offer': offer}
++                with tempfile.TemporaryDirectory() as tmp:
++                    destination = Path(tmp) / 'Received'
++                    with self.assertRaisesRegex(ValueError, 'unavailable'):
++                        transfer.download(ticket, destination, *server.server_address)
++                    self.assertFalse(destination.exists())
++            finally:
++                server.shutdown()
++                worker.join()
+-- 
+2.55.0
+

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 )
 
@@ -15,9 +16,11 @@ import (
 type clipKind string
 
 const (
-	clipText  clipKind = "text"
-	clipPNG   clipKind = "png"
-	clipFiles clipKind = "files"
+	clipText     clipKind = "text"
+	clipPNG      clipKind = "png"
+	clipFiles    clipKind = "files"
+	clipTransfer clipKind = "transfer"
+	clipDrop     clipKind = "drop"
 )
 
 const (
@@ -39,6 +42,9 @@ func (i clipItem) allowed() bool {
 	switch i.Kind {
 	case clipText:
 		return clipboardTextAllowed(string(i.Data))
+	case clipTransfer, clipDrop:
+		var ticket fileTransferTicket
+		return len(i.Data) <= 4096 && json.Unmarshal(i.Data, &ticket) == nil && validClipboardTicket(ticket)
 	case clipFiles:
 		_, err := inspectClipboardArchive(i.Data)
 		return err == nil
@@ -62,6 +68,10 @@ func encodeClipFrame(i clipItem) string {
 	line := base64.StdEncoding.EncodeToString(i.Data)
 	if i.Kind == clipPNG {
 		line = pngFramePrefix + line
+	} else if i.Kind == clipDrop {
+		line = "drop:" + line
+	} else if i.Kind == clipTransfer {
+		line = "transfer:" + line
 	} else if i.Kind == clipFiles {
 		line = "files:" + line
 	}
@@ -82,6 +92,14 @@ func decodeClipFrame(line string) (clipItem, bool) {
 	if strings.HasPrefix(line, "files:") {
 		kind = clipFiles
 		line = line[len("files:"):]
+	}
+	if strings.HasPrefix(line, "transfer:") {
+		kind = clipTransfer
+		line = strings.TrimPrefix(line, "transfer:")
+	}
+	if strings.HasPrefix(line, "drop:") {
+		kind = clipDrop
+		line = strings.TrimPrefix(line, "drop:")
 	}
 	data, err := base64.StdEncoding.DecodeString(line)
 	if err != nil {

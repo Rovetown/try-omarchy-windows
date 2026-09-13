@@ -86,3 +86,84 @@ and poweroff, a second launch that downloads only `SHA256SUMS`, disk growth,
 a fresh install through the location picker, and the forced rollback (kill
 the launcher after "QMP connected" and before "userspace announced ready",
 then relaunch and confirm no download and the previous payload).
+
+## Complete guest file-transfer round trip
+
+Run `TestGuestDesktopFileTransferRoundTrip` alone in the interactive Windows
+session with `TRYOMARCHY_GUEST_TRANSFER_TEST=1`. It owns ports 4448, 4449 and
+4452, so stop the launcher first. Run the matching Linux smoke command against
+the same Windows machine with `--displays 1 --file-transfer-round-trip`.
+`windows-qemu-stdio.py` supplies the Windows QEMU serial transport; its module
+docstring lists the required environment variables.
+
+Use an expanded disposable disk, as a normal installation does. For example,
+create a new QCOW2 overlay with the candidate's Windows `qemu-img.exe`:
+
+```powershell
+qemu-img.exe create -f qcow2 -F raw -b D:\candidate\rootfs.ext4 D:\candidate\transfer-test.qcow2 20G
+```
+
+Then add `--disk-image /local/candidate/transfer-test.qcow2 --disk-format qcow2`
+to the smoke command. The serial wrapper maps the local candidate prefix to
+`TRYOMARCHY_WINDOWS_GUEST`. The smoke also uses QEMU's temporary snapshot mode,
+so the factory image and supplied overlay remain intact. The compact factory
+image alone has insufficient user space for the transfer service's 1 GiB
+reserve; a failure there does not represent an installed VM.
+
+The fixture sends 31 MiB files with Unicode names in both directions, verifies
+bytes and original files, checks the guest's native transfer window, and asserts
+that neither clipboard was replaced. The separate opt-in
+`TestNativeQEMUFileDropEvent` performs the actual Windows OLE mouse drag into
+SDL. Run that with `TRYOMARCHY_NATIVE_DROP_TEST=1` and `QEMU_SYSTEM` pointing to
+the matching runtime, without other UI tests or manual pointer activity.
+
+## Native Windows Vulkan memory diagnostics
+
+These small host-side probes investigate a guest Venus allocation failure without
+changing the guest, driver or player preferences. Run with native Windows Python
+and the `vulkan==1.3.275.1` Python package. An isolated dependency directory can
+be supplied instead of installing into the Python environment:
+
+```powershell
+python -m pip install --target C:\acceptance-deps vulkan==1.3.275.1
+python scripts\vmtest\windows-vulkan-memory.py --vulkan-python-path C:\acceptance-deps
+python scripts\vmtest\windows-vulkan-host-import.py --vulkan-python-path C:\acceptance-deps
+python scripts\vmtest\windows-vulkan-images.py --vulkan-python-path C:\acceptance-deps
+```
+
+The first prints the buffer memory-type masks with ordinary and OPAQUE_WIN32
+allocations. On the September 13 AMD laptop, the external-buffer mask is `0x1`,
+with no host-visible memory type, whereas the ordinary buffer has mask `0xf`.
+The current runtime forces external buffers, explaining the observed guest
+staging-buffer allocation failure. This diagnostic reports capabilities; an exit
+code of zero alone is not a guest Vulkan pass.
+
+The first also queries host-allocation handles and verifies whether the driver
+permits combining them with Win32 export handles before testing that combination.
+The AMD driver reports disjoint compatible-handle masks (`0x80` and `0x2`), so
+combining them is not a valid fix.
+
+The second imports a pagefile-backed Windows shared section, binds it to a Vulkan
+buffer, fills it on the GPU, synchronizes host access, and checks all 64 KiB through
+two independent views after the original section handle is closed. It passed
+on that laptop, identifying a possible implementation direction. It does not
+implement or validate a Venus/QEMU sharing path. Devices lacking the extension
+are explicitly reported as skipped, not passed. Keep the JSON output with the
+host driver identity and integrated guest playback results.
+
+Add `--image-tiling linear` or `--image-tiling optimal` to the host-import probe
+to allocate a host-imported RGBA8 image, clear it on the GPU, copy it into the
+shared buffer, and verify all pixels through both Windows mappings. This tests
+image allocation and transfers, beyond the separate capability-only probe.
+
+The third queries RGBA8 linear/optimal image support and memory-type masks for
+ordinary, Win32-exportable and host-importable images. It does not allocate image
+memory or prove guest playback. On the AMD laptop, host-importable images support
+host-visible types 1 and 3; Win32-exportable images support only type 0.
+
+`runtime-build/test-win32-handles-native.py <runtime-bin>\libvirglrenderer-1.dll`
+tests the actual renderer DLL's handle lookup, duplication, mapping and ownership
+using a 64 KiB section. Its temporary, thread-local CRT handler records invalid
+parameter calls as failures and is restored before exit. It does not alter the
+guest or Windows settings. Runtime r12 fails this test; the r13 correction must
+pass before the shared-memory backend can rely on these functions.

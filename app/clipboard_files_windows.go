@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -26,18 +27,20 @@ func clipboardFilesCache() (string, error) {
 	return filepath.Join(dir, "TryOmarchy", "Clipboard"), nil
 }
 
-func clipboardGetFiles() (clipItem, bool) {
+func clipboardGetFilePaths() ([]string, bool) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if !openClipboard() {
-		return clipItem{}, false
+		return nil, false
 	}
 	data, ok := clipboardGlobalBytes(cfHDrop, 1<<20)
 	procCloseClipboard.Call()
 	if !ok || len(data) < 22 {
-		return clipItem{}, false
+		return nil, false
 	}
 	offset := int(binary.LittleEndian.Uint32(data))
 	if offset < 20 || offset >= len(data)-1 || binary.LittleEndian.Uint32(data[16:20]) != 1 || offset%2 != 0 {
-		return clipItem{}, false
+		return nil, false
 	}
 	var paths []string
 	var chars []uint16
@@ -54,15 +57,23 @@ func clipboardGetFiles() (clipItem, bool) {
 		}
 		p := syscall.UTF16ToString(chars)
 		if !filepath.IsAbs(p) {
-			return clipItem{}, false
+			return nil, false
 		}
 		paths = append(paths, p)
 		chars = nil
-		if len(paths) > maxClipboardFileEntries {
-			return clipItem{}, false
+		if len(paths) > clipboardTransferLimits.Entries {
+			return nil, false
 		}
 	}
 	if !terminated || len(paths) == 0 {
+		return nil, false
+	}
+	return paths, true
+}
+
+func clipboardGetFiles() (clipItem, bool) {
+	paths, ok := clipboardGetFilePaths()
+	if !ok {
 		return clipItem{}, false
 	}
 	data, err := packClipboardFiles(paths)
@@ -91,6 +102,13 @@ func clipboardSetFiles(item clipItem) bool {
 			os.RemoveAll(filepath.Dir(paths[0]))
 		}
 	}()
+	keep = clipboardSetFilePaths(paths)
+	return keep
+}
+
+func clipboardSetFilePaths(paths []string) bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	data := make([]byte, 20)
 	binary.LittleEndian.PutUint32(data, 20)
 	binary.LittleEndian.PutUint32(data[16:], 1)
@@ -140,6 +158,5 @@ func clipboardSetFiles(item clipItem) bool {
 		procGlobalFree.Call(h)
 		return false
 	}
-	keep = true
 	return true
 }

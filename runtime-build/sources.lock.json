@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r3",
+  "name": "winq-emu-alpha10-source-r15",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -17,6 +17,46 @@
       {
         "file": "patches/qemu/0002-restore-bounded-sdl-refresh-intervals.patch",
         "sha256": "61bc4a8e9a18487a4363241d4d949321758ed1b1fae7bb800cbb4f37f494403a"
+      },
+      {
+        "file": "patches/qemu/0003-usb-explicit-attachment-without-reconnect.patch",
+        "sha256": "2c838d4b4224dd344f9d036f7ea5b7d216a92cbf45ecefb07f66865698dc347f"
+      },
+      {
+        "file": "patches/qemu/0004-bound-usb-port-path-formatting.patch",
+        "sha256": "59655b858dafd7a6125d886a73174056934c5b492152431ed315052f6197dbea"
+      },
+      {
+        "file": "patches/qemu/0005-restore-windows-socket-handle-protection.patch",
+        "sha256": "3d25a06e9b0eeb11a6781e4655cbee7ce201f2f75f55457f96e9ae4bde0a7623"
+      },
+      {
+        "file": "patches/qemu/0006-preserve-complete-usb-port-identities.patch",
+        "sha256": "f9f89d8454d7bc9cba96f967f4905c9534d5a4210a74404ea933c5727f694f47"
+      },
+      {
+        "file": "patches/qemu/0007-report-native-file-drops.patch",
+        "sha256": "7711bd1ac183d09ed2c6f75c8b0e688a314881efa4a94ad379acd4b851e8c0ab"
+      },
+      {
+        "file": "patches/qemu/0008-preserve-windows-share-unicode-and-times.patch",
+        "sha256": "47b9e13191858cdeefaa7407d4049e273dd8888cfc472008b70d431cea9ef14f"
+      },
+      {
+        "file": "patches/qemu/0009-use-utf8-for-windows-runtime-paths.patch",
+        "sha256": "635c48e6d10ddc80ac3a068f275b877c51e062d188986fdd86ebb775a0a74670"
+      },
+      {
+        "file": "patches/qemu/0010-reset-sdl-scanout-before-destroying-secondary-window.patch",
+        "sha256": "2e74e6c99704e1c1894e3702f2756dfed0609fcb8a9c8b9628bfde0ca53a15a6"
+      },
+      {
+        "file": "patches/qemu/0011-ignore-stale-sdl-window-input.patch",
+        "sha256": "1e2054dbd2ac37f37fa7163af269c3629c386a6f5ead3a618ef544b6ef641bdf"
+      },
+      {
+        "file": "patches/qemu/0012-share-secondary-sdl-gl-contexts.patch",
+        "sha256": "ae3aea46f9ab12f06b9efde0f874f94c4515009c933ebc138abf4bb00f1057e8"
       }
     ]
   },
@@ -26,6 +66,20 @@
     "upstream": "https://gitlab.freedesktop.org/virgl/virglrenderer.git",
     "baseTag": "1.3.0",
     "baseCommit": "ca50e008863837e094747a69974dde3ae148aeaa",
-    "license": "MIT"
+    "license": "MIT",
+    "patches": [
+      {
+        "file": "patches/virglrenderer/0001-resolve-windows-handle-tokens-before-crt.patch",
+        "sha256": "0419c3e3e8ada85e7777a8beb0d8e9f9bb918c904bb33546039161ef74e05d73"
+      },
+      {
+        "file": "patches/virglrenderer/0002-import-windows-host-memory-for-internal-resources.patch",
+        "sha256": "403f60a2a00cf65b860e5bec8b98483e00056949d945bb4174a46b6416f5cc53"
+      },
+      {
+        "file": "patches/virglrenderer/0003-preserve-device-local-resources-until-memory-binding.patch",
+        "sha256": "b670661e2811a01ff53496a2beb492150bfe739258bd76c7d5e2d9b0e5669be7"
+      }
+    ]
   }
 }

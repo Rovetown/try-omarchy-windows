@@ -1,12 +1,66 @@
 # Windows session handoff
 
+For the September 13 physical laptop continuation, read
+[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md)
+for current paths, runtime r8–r11 corrections, evidence and unresolved acceptance
+failures. The earlier lab paths and results below are historical.
+
 Updated September 12, 2026. Start here before further release testing.
 
-Use **v0.0.17-preview** for the next combined testing round. It includes file
-clipboard, reclaim controls and scrolling Settings, with compatibility revision
-18. Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for exact artifacts
-and completed checks, and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for
-the test matrix. Signed v16 does not include these features.
+For the exact checkout, next engineering steps and release assessment, read
+[SESSION-RESUME.md](SESSION-RESUME.md).
+
+The full-feature work is on `codex/full-feature-completion`. Read
+[FULL-FEATURE-COMPLETION.md](FULL-FEATURE-COMPLETION.md) first for implementation
+and acceptance evidence. The signed **v0.0.17-preview** is the regression
+baseline; it predates the active snapshot rollback, portable lifecycle,
+multi-display, LAN, USB and saved-session work on that branch.
+
+The latest source-built runtime is recipe r7 from
+[build 34729022320](https://github.com/omacom/try-omarchy-windows/actions/runs/34729022320).
+Its USB and RAM restore smokes passed, and the archives were verified against
+the pinned source recipe. In the nested lab it is extracted to
+`D:\TryOmarchyFullFeaturesTest\runtime-r7`. The runtime archive SHA256 is
+`d2a3c972d6837730ecb99f3b470af534f0dba8ca7faf3b2dc36be8adb5fbc3df`.
+
+The complete compatibility-19 guest was built by the Guest image candidate job
+in [run 34731444397](https://github.com/omacom/try-omarchy-windows/actions/runs/34731444397).
+All jobs in that run passed. It includes patch 0063, which fixes outgoing
+file transfers staging archives in the small runtime tmpfs. The image includes
+Omarchy 4.0.3, runtime package 4.0.3-3, streaming transfers and native GTK
+file-transfer windows. The earlier compatibility-19 build passed a Linux KVM
+graphical boot with a visible native transfer window.
+
+The verified guest lives at `D:\TryOmarchyFullFeaturesTest\guest19-r2` in Windows
+and `/data/try-omarchy-feature-guest-artifacts/compat19-r2` on Linux (compressed
+image and metadata; the raw image was stream-verified). Rootfs SHA256:
+`dafc29fe70e74fd6621290c0172a4d0a3b16ad237cb747a14cfa83a31fdca82a`.
+Keep these unsigned feature artifacts separate from signed release payloads.
+
+Review and test evidence is in [PR-110-REVIEW.md](PR-110-REVIEW.md).
+The final r7 suite passed 344 Windows tests including the capability-negotiation
+fix. Native OLE dragging from the Windows transfer window into actual SDL QEMU
+also passed five repeated runs. The final compatibility-19 guest passed the
+Windows TCG graphical boot and a 31 MiB file-drop round trip in both directions.
+Both native transfer windows appeared; file bytes, originals and clipboards
+were preserved. The fixture passed in 154.39 seconds.
+
+The round-trip test executable is `D:\TryOmarchyFullFeaturesTest\drop-session.test.exe`,
+SHA256 `818de0b9d8db5390bb66d48ab801ccca876d297b66c19be67b51341f2d7f59a7`.
+Its log is `D:\TryOmarchyFullFeaturesTest\guest-transfer.txt`. The earlier
+344-test executable is retained as `drop-session-full-tested.exe`, with its
+hash and log recorded in the review. Reproduction instructions are in
+[`scripts/vmtest/README.md`](../scripts/vmtest/README.md).
+
+Use the `guest19-r2` image for the next round. The earlier `guest19` image
+predates the disk-cache fix. The expanded `transfer-test.qcow2` is a disposable
+smoke-test overlay, separate from the installation and signed baseline.
+
+When rerunning smoke checks against the signed v17 baseline, pass
+`--compat-revision 18` explicitly. The compatibility-19 guest uses the default.
+
+Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for the signed baseline
+artifacts and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for its test matrix.
 
 ## Current release state
 

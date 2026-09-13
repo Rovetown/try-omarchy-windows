@@ -27,7 +27,7 @@ class PrepareAssetsTests(unittest.TestCase):
             seed = b"guest metadata"
             (artifacts / "guest.json").write_bytes(seed)
             (artifacts / "SHA256SUMS").write_text(
-                f"{sha256(seed)}  guest.json\n", encoding="utf-8"
+                f"{sha256(seed)}  guest.json\n", encoding="utf-8", newline="\n"
             )
 
             entries = {}

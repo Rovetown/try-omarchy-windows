@@ -17,6 +17,7 @@ REQUIRED = {
     "bin/qemu-img.exe",
     "bin/libvirglrenderer-1.dll",
     "bin/SDL2.dll",
+    "bin/libusb-1.0.dll",
     "bin/share/bios-256k.bin",
     "provenance/sources.lock.json",
     "provenance/runtime-manifest.json",

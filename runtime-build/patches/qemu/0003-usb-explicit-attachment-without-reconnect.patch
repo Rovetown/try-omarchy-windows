@@ -1,0 +1,60 @@
+--- a/hw/usb/host-libusb.c
++++ b/hw/usb/host-libusb.c
+@@ -91,6 +91,7 @@
+     uint32_t                         options;
+     uint32_t                         loglevel;
+     bool                             needs_autoscan;
++    bool                             auto_reconnect;
+     bool                             allow_one_guest_reset;
+     bool                             allow_all_guest_resets;
+     bool                             suppress_remote_wake;
+@@ -1223,16 +1224,37 @@
+         }
+     } else
+ #endif
+-    if (s->match.addr && s->match.bus_num &&
+-        !s->match.vendor_id &&
+-        !s->match.product_id &&
+-        !s->match.port) {
++    if (!s->auto_reconnect ||
++        (s->match.addr && s->match.bus_num &&
++         !s->match.vendor_id && !s->match.product_id && !s->match.port)) {
++        struct libusb_device_descriptor descriptor;
++        char port[16];
++
++        if (!s->match.addr) {
++            error_setg(errp, "hostaddr is required without auto-reconnect");
++            return;
++        }
+         s->needs_autoscan = false;
+         ldev = usb_host_find_ref(s->match.bus_num,
+                                  s->match.addr);
+         if (!ldev) {
+             error_setg(errp, "failed to find host usb device %d:%d",
+                        s->match.bus_num, s->match.addr);
++            return;
++        }
++        if (libusb_get_device_descriptor(ldev, &descriptor) != 0 ||
++            ((!s->auto_reconnect || s->match.vendor_id) &&
++             descriptor.idVendor != s->match.vendor_id) ||
++            ((!s->auto_reconnect || s->match.product_id) &&
++             descriptor.idProduct != s->match.product_id)) {
++            libusb_unref_device(ldev);
++            error_setg(errp, "selected USB device identity changed");
++            return;
++        }
++        usb_host_get_port(ldev, port, sizeof(port));
++        if (s->match.port && strcmp(port, s->match.port)) {
++            libusb_unref_device(ldev);
++            error_setg(errp, "selected USB device port changed");
+             return;
+         }
+         rc = usb_host_open(s, ldev, 0);
+@@ -1759,6 +1781,7 @@
+ };
+ 
+ static const Property usb_host_dev_properties[] = {
++    DEFINE_PROP_BOOL("auto-reconnect", USBHostDevice, auto_reconnect, true),
+     DEFINE_PROP_UINT32("hostbus",  USBHostDevice, match.bus_num,    0),
+     DEFINE_PROP_UINT32("hostaddr", USBHostDevice, match.addr,       0),
+     DEFINE_PROP_STRING("hostport", USBHostDevice, match.port),

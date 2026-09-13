@@ -15,20 +15,24 @@ const (
 )
 
 type config struct {
-	dir, hostDir, payloadDir string
-	winqEmu, share           string
-	fresh, fullscreen, noGpu bool
-	hostCursor               bool
-	instant, portable        bool
-	guestDir, vmDir, disk    string
-	diskFormat               string
-	qemu                     string
-	useGpu                   bool
-	supportsSharing          bool
-	audio                    string
-	memMiB                   int
-	forwards                 []portForward
-	sshKey                   string
+	dir, hostDir, payloadDir    string
+	winqEmu, share              string
+	fresh, fullscreen, noGpu    bool
+	hostCursor                  bool
+	lanPublic                   bool
+	instant, portable           bool
+	guestDir, vmDir, disk       string
+	qmpDir                      string
+	diskFormat                  string
+	qemu                        string
+	useGpu                      bool
+	supportsSharing             bool
+	audio                       string
+	memMiB                      int
+	displays                    int
+	displayWidth, displayHeight int
+	forwards                    []portForward
+	sshKey                      string
 	// Guest RAM chosen by the user (settings.json or -memory); 0 = automatic.
 	memOverrideMiB int
 	diskGiB        int
@@ -289,7 +293,7 @@ func TestAudioUnavailableMatchesOnlyDirectSoundStartupFailures(t *testing.T) {
 
 func TestBuildQemuArgsForwardsPortsOnLoopback(t *testing.T) {
 	cfg := &config{vmDir: "/vm", guestDir: "/guest", disk: "/vm/disk.raw", diskFormat: "raw",
-		memMiB: 4096, audio: "none", forwards: []portForward{{"tcp", 2222, 22}}}
+		memMiB: 4096, audio: "none", forwards: []portForward{{"tcp", 2222, 22, ""}}}
 	args := strings.Join(buildQemuArgs(cfg, "root=/dev/vda"), " ")
 	if !strings.Contains(args, "-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 ") {
 		t.Fatalf("forward missing from QEMU args: %s", args)
@@ -334,7 +338,7 @@ func TestBuildQemuArgsUsesTheChosenCPUCountAndHostMem(t *testing.T) {
 	cfg := &config{vmDir: "/vm", guestDir: "/guest", disk: "/vm/disk.raw", diskFormat: "raw",
 		memMiB: 8192, hostTotalMiB: 32768, cpus: 6, audio: "none", useGpu: true}
 	args := strings.Join(buildQemuArgs(cfg, "root=/dev/vda"), " ")
-	if !strings.Contains(args, " -smp 6 -m 8192M ") || !strings.Contains(args, "hostmem=4G") {
+	if !strings.Contains(args, " -smp 6 -m 8192M ") || !strings.Contains(args, "hostmem=4294967296") {
 		t.Fatalf("cpu count or hostmem missing: %s", args)
 	}
 	cfg.cpus = 0

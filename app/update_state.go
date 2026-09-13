@@ -23,6 +23,7 @@ type launcherUpdateState struct {
 	SHA256      string `json:"sha256"`
 	Started     bool   `json:"started"`
 	HasPrevious bool   `json:"hasPrevious"`
+	Portable    bool   `json:"portable,omitempty"`
 }
 
 func readLauncherUpdateState(dir string) (*launcherUpdateState, error) {
@@ -167,4 +168,14 @@ func decodeRestartArgs(encoded string) ([]string, error) {
 		}
 	}
 	return args, nil
+}
+
+func launcherUpdateTarget(dir string, portable bool) (string, error) {
+	if portable {
+		if filepath.Base(filepath.Clean(dir)) != "data" {
+			return "", fmt.Errorf("portable update requires its data directory")
+		}
+		return filepath.Join(filepath.Dir(dir), stableLauncherName), nil
+	}
+	return filepath.Join(dir, stableLauncherName), nil
 }

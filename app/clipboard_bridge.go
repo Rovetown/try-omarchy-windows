@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -28,8 +31,18 @@ type clipBridge struct {
 	// sequence reports the Windows clipboard sequence number when available,
 	// so an unchanged clipboard (which may hold a large image) is not read
 	// and converted on every poll.
-	sequence     func() uint32
-	lastSequence uint32
+	sequence            func() uint32
+	lastSequence        uint32
+	transfers           *fileTransferService
+	transferEnabled     bool
+	transferNegotiating bool
+	outgoingTransfer    string
+	showTransfer        func(*transferProgress)
+	transferError       func(error)
+	getPaths            func() ([]string, bool)
+	setPaths            func([]string) bool
+	setDropPaths        func([]string) bool
+	dropRequests        chan []string
 }
 
 func (b *clipBridge) acceptPush(l net.Listener) {
@@ -55,6 +68,10 @@ func (b *clipBridge) acceptPush(l net.Listener) {
 			if err != nil || !strings.HasSuffix(line, "\n") {
 				return
 			}
+			if (strings.HasPrefix(line, "files-offer:") || strings.HasPrefix(line, "drop-offer:")) && b.transfers != nil {
+				b.receiveClipboardTransfer(c, line)
+				return
+			}
 			item, ok := decodeClipFrame(line)
 			if !ok {
 				return
@@ -75,11 +92,38 @@ func (b *clipBridge) acceptPull(l net.Listener) {
 			b.pullConn.Close()
 		}
 		b.pullConn = c
+		b.transferEnabled = false
+		b.transferNegotiating = true
 		b.state = clipboardSyncState{}
 		b.mu.Unlock()
 		logf("clipboard: guest connected")
 		b.sendCurrentHost(c)
+		// Legacy guests never send a greeting. Release their initial file
+		// selection after a short grace period, but keep listening so a slow
+		// current guest can still negotiate streaming on this connection.
+		timer := time.AfterFunc(300*time.Millisecond, func() {
+			b.finishTransferNegotiation(c, false)
+		})
+		go func() {
+			hello, _ := bufio.NewReader(io.LimitReader(c, 64)).ReadString('\n')
+			timer.Stop()
+			b.finishTransferNegotiation(c, hello == "transfer-v1\n")
+		}()
+
 	}
+}
+
+// A late greeting may upgrade only the connection that sent it.
+func (b *clipBridge) finishTransferNegotiation(c net.Conn, capable bool) {
+	b.mu.Lock()
+	if b.pullConn != c || (!b.transferNegotiating && (!capable || b.transferEnabled)) {
+		b.mu.Unlock()
+		return
+	}
+	b.transferNegotiating = false
+	b.transferEnabled = capable && b.transfers != nil
+	b.mu.Unlock()
+	b.sendCurrentHost(c)
 }
 
 func (b *clipBridge) pollHost() {
@@ -87,12 +131,13 @@ func (b *clipBridge) pollHost() {
 		time.Sleep(400 * time.Millisecond)
 		b.mu.Lock()
 		conn := b.pullConn
+		lastSequence := b.lastSequence
 		b.mu.Unlock()
 		if conn == nil {
 			continue
 		}
 		if b.sequence != nil {
-			if seq := b.sequence(); seq == b.lastSequence {
+			if seq := b.sequence(); seq == lastSequence {
 				continue
 			}
 		}
@@ -106,10 +151,46 @@ func (b *clipBridge) sendCurrentHost(conn net.Conn) {
 	if b.pullConn != conn {
 		return
 	}
+	if b.transferNegotiating && b.getPaths != nil {
+		if _, files := b.getPaths(); files {
+			return
+		}
+	}
 	if b.sequence != nil {
 		b.lastSequence = b.sequence()
 	}
-	cur, ok := b.getHost()
+	if b.outgoingTransfer != "" {
+		b.transfers.Cancel(b.outgoingTransfer)
+		b.outgoingTransfer = ""
+	}
+	var cur clipItem
+	var ok bool
+	if b.transferEnabled && b.getPaths != nil {
+		if paths, files := b.getPaths(); files {
+			progress := b.progress("Preparing files for Omarchy")
+			ticket, err := b.transfers.Offer(progress.ctx, paths, progress.report)
+			if err != nil {
+				progress.finish()
+				logf("clipboard transfer: %v", err)
+				if b.transferError != nil && !errors.Is(err, context.Canceled) {
+					go b.transferError(err)
+				}
+				return
+			}
+			if b.sequence != nil && b.sequence() != b.lastSequence {
+				b.transfers.Cancel(ticket.ID)
+				progress.finish()
+				return
+			}
+			b.outgoingTransfer = ticket.ID
+			go monitorClipboardTransfer(progress, b.transfers, ticket.ID)
+			data, _ := json.Marshal(ticket)
+			cur, ok = clipItem{Kind: clipTransfer, Data: data}, true
+		}
+	}
+	if !ok {
+		cur, ok = b.getHost()
+	}
 	if !ok || !b.state.shouldSendHost(cur) {
 		return
 	}

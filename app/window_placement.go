@@ -38,8 +38,11 @@ type windowPlacement struct {
 func (r screenRect) width() int32  { return r.Right - r.Left }
 func (r screenRect) height() int32 { return r.Bottom - r.Top }
 
-func loadWindowPlacement(dir string) (*windowPlacement, error) {
-	data, err := os.ReadFile(filepath.Join(dir, windowPlacementFilename))
+func loadWindowPlacement(dir string) (*windowPlacement, error) { return loadDisplayPlacement(dir, 0) }
+
+func loadDisplayPlacement(dir string, index int) (*windowPlacement, error) {
+	filename := displayPlacementFilename(index)
+	data, err := os.ReadFile(filepath.Join(dir, filename))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -59,13 +62,15 @@ func loadWindowPlacement(dir string) (*windowPlacement, error) {
 	return &p, nil
 }
 
-func saveWindowPlacement(dir string, p windowPlacement) error {
+func saveWindowPlacement(dir string, p windowPlacement) error { return saveDisplayPlacement(dir, 0, p) }
+
+func saveDisplayPlacement(dir string, index int, p windowPlacement) error {
 	p.Schema = windowPlacementSchemaNow
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, windowPlacementFilename)
+	path := filepath.Join(dir, displayPlacementFilename(index))
 	tmp := path + ".part"
 	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
 		return err
