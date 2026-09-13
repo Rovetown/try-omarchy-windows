@@ -6,8 +6,10 @@ the corrected compatibility-19 guest-r2. Existing native Omarchy testing is
 outside this run's scope.
 
 Latest checkpoint: storage recovery and retained-source cleanup pass; runtime
-r12 is installed and its three-output DPMS checks pass. Its one-hour endurance
-run is in progress. Default Vulkan playback still fails on this AMD host.
+r12 passed three-output GPU/CPU DPMS checks and its one-hour endurance run.
+Shutdown confirmation and forced GPU-to-CPU fallback also pass. Full snapshot
+and portable lifecycle acceptance is continuing. Default Vulkan playback still
+fails on this AMD host.
 The dated sections below retain prior failures and superseded intermediate states.
 
 Open release gates include the AMD Vulkan playback failure, camera usability,
@@ -56,7 +58,7 @@ Hyper-V role is disabled. Detailed facts are in `host-inventory.json`.
 | Windows automated runtime suite with native UI and clipboard opt-ins | Pass, 342 top-level tests; 9 skipped | `windows-full-retest.jsonl`, `windows-full-retest.stderr.txt` |
 | Release helper tests | Pass, 15 tests | `release-helper-final.txt` |
 | Fresh combined-candidate WHPX desktop and GPU | Pass | `fresh-r7/vm/shell.log`, `fresh-r7/render-probe.json`; visible desktop and runtime SHA256 match |
-| CPU rendering | Pass explicit CPU path; forced probe failure pending | `cpu-render-guest.txt`; reboot and relaunch preserved file hashes |
+| CPU rendering | Pass explicit r12 three-display path and forced GPU-startup fallback | `r12-cpu-three-dpms.txt`, `r12-forced-fallback-guest.txt`, `r12-forced-fallback-probe.json` |
 | Native clipboard, transfer window, USB manager, display-window lifecycle | Pass for fixtures | `native-tests.jsonl`; does not prove real guest/device integration |
 | Actual native OLE drag into SDL | Pass, three repetitions | `native-ole-drop-tests.jsonl` |
 | LAN firewall lifecycle | Blocked by Windows permissions | `firewall-tests.jsonl`: New-NetFirewallRule returned Access is denied; not a pass |
@@ -69,7 +71,8 @@ Hyper-V role is disabled. Detailed facts are in `host-inventory.json`.
 | Audio routing | Pass host-session playback/capture lifecycle; subjective sound/device-switch tests open | `audio-tone.json`, `audio-capture.json`, `capture-byte-count.txt`, `audio-after-capture.json` |
 | Backup and restore | Pass creation, cancellation, full disk hash verification, restored Unicode-path boot on r9 | Persistent fixture hashes also survive disk growth, reclaim and relaunch |
 | Awake idle / video CPU | Five-minute samples pass; default Vulkan playback fails | Idle mean host CPU 0.611639%; explicit OpenGL video mean 11.30079% |
-| One-hour endurance and host sleep/resume | Pending | Earlier individual sessions lasted less than one hour; host has not slept or rebooted |
+| One-hour endurance | Pass r12, 61 samples over 3,613 seconds | `r12-endurance-result.json`; stable process/boot identities, QMP disk status and fixture hashes |
+| Host sleep/resume | Pending | Host has not slept or rebooted during this acceptance run |
 | Multiple displays | r12 three-output GPU DPMS passes; secondary native rendering observed; full visual/input acceptance ongoing | r10 teardown, r11 stale-input and r12 GL-context sharing fixes; r12-gpu-dpms-cycles.txt |
 | Installation move | Pass cancellation, disk-full recovery, redirect boot and retained-source cleanup | move-cleanup-result.json; moved-guest-persistence.txt |
 | Launcher TCP/UDP forwards | Pass localhost round trips | `r9-launcher-forwards.json`; LAN/firewall remains separate |
@@ -591,3 +594,48 @@ outbound HTTPS returned 200. This does not test host adapter changes or LAN
 firewall behavior. Windows Central Standard Time/en-US mapped to guest
 America/Chicago/en_US.UTF-8 with US keyboard configuration. Evidence:
 r12-guest-link-recovery.json and r12-host-locale-integration.json.
+
+### Completed r12 endurance, shutdown, CPU fallback and test-copy cleanup
+
+The r12 endurance monitor passed all 61 samples over 3,613.46 monotonic seconds.
+The same QEMU process and guest boot identity survived idle time, video playback,
+display changes, audio output and the brief virtual-link recovery test. QMP disk
+I/O status and both persistent fixture hashes remained valid. Final kernel error
+scan contains only the unsupported Intel TDX message on this AMD host; no block
+I/O or ext4 error was reported. The five-minute post-video idle check averaged
+0.6242% host CPU across 60 samples (maximum 1.7890%).
+
+Alt+F4 from a secondary display opened shutdown confirmation. The desktop helper
+could inspect the dialog through its primary QEMU owner, but rejected mouse input
+because the actual dialog belongs to the launcher. Normal dialog keyboard input
+worked: Return on default No dismissed it without stopping the guest; on the
+second prompt Left selected Yes and Return confirmed it. The launcher recorded
+graceful shutdown, guest poweroff and clean exit. Evidence: r12-close-no-result.json,
+r12-close-yes-result.json, r12-close-confirmation.jpg and r12-endurance-history.
+
+R12 then booted three fullscreen CPU-rendered outputs, passed three DPMS cycles,
+rendered all three native desktops and shut down cleanly. A separate auto-render
+launch set SDL_OPENGL_LIBRARY to a deliberately nonexistent test path only in
+that process environment. The GPU attempt failed with 0xc0000005 as induced;
+the launcher logged the failure, automatically booted CPU rendering on attempt
+2, recorded a CPU probe result and reached a visible desktop with intact fixture
+hashes. The environment override was restored after launch. The guest then shut
+down cleanly. This is controlled failure-recovery evidence, not a spontaneous
+r12 GPU crash. See r12-cpu-history, r12-fallback-history and the corresponding
+launch scripts/results.
+
+After preserving those logs and screenshots, the product uninstaller removed
+only `Restored 世界`. The moved installation and original user installation
+remain present. The path-scoped preflight and result are in
+r12-retire-restored-preflight.json and r12-retire-restored-result.json, with
+r12-uninstall-success.jpg. C: reported 48,624,910,336 free bytes afterward.
+This target is distinct from previously approval-rejected cleanup targets.
+The moved installation then updated through the isolated combined-payload
+launcher, booted with the verified r12 runtime and both persistent hashes intact,
+and shut down cleanly. The combined manifest digest is
+`089a3e2e9e45386581f40bfa3c34f866f49e4886c6b7b1e59353a4accd8f3fdd`;
+the isolated launcher SHA256 is
+`6e5b5605da2d45731fd3e8e090d16e708c136f59f31248c6db068b3da5898640`.
+Public release defaults remain unchanged. Evidence: combined-r12-moved-runtime.json
+and combined-r12-moved-persistence.txt. Full snapshot creation with the Unicode
+name `r12 baseline 世界` is now running through the native UI.

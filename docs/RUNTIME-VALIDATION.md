@@ -6,7 +6,9 @@ That round found r7 shared-folder Unicode/timestamp failures and Unicode
 installation-path failures. The r8 sharing correction passes on the laptop;
 r9 path correction passes restored Unicode-path boot. Multi-display failures
 produced r10/r11/r12 corrections; r12 three-output power cycling and secondary
-rendering pass initial physical checks, with endurance and input acceptance ongoing. Default mpv Vulkan
+rendering pass physical checks, including a 61-sample, 3,613-second endurance run,
+three-output CPU rendering, graceful close confirmation and induced GPU-to-CPU
+fallback. Physical keyboard/focus acceptance remains open. Default mpv Vulkan
 playback also fails on this AMD configuration, although explicit OpenGL plays.
 These findings keep the public pin unchanged.
 
