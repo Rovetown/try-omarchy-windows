@@ -118,7 +118,7 @@ fixtures live in `/home/omarchy/Acceptance`; expected file hashes are recorded i
 re-added or configured through `-ssh` on relaunch. The shared directory is
 `C:\cssi\try-omarchy-acceptance\2026-09-13\shared`.
 
-The confirmed 9p Unicode failure is still open. Creating `Clipboard 世界` on
+The confirmed 9p Unicode failure is still open. Creating `Clipboard ä¸ç` on
 Windows made `ls /mnt/host` fail with Input/output error. Renaming it to
 `Clipboard-ascii` restored directory enumeration. The clipboard copy containing
 the same Unicode names passes in both directions. Runtime source inspection
@@ -209,7 +209,7 @@ completion from automated test counts or mediated transfer-window tests.
   6,491,469,142 bytes, 204 manifest entries. Do not upload this private archive.
 - The 24 GiB source disk, archived disk manifest and restored disk all have SHA256
   `84357b2abb206b6501ce6cc549b986db48a1b95e60c240d6ee36183795390c12`.
-  Full restore into `Restored 世界` passed. Restore cancellation also left no
+  Full restore into `Restored ä¸ç` passed. Restore cancellation also left no
   destination or staging directory and preserved backup/source. The CLI restore
   tells users to launch with -dir; the separate recovery-UI shortcut path has
   not yet been tested.
@@ -240,7 +240,7 @@ pass, including host-side checksum comparison. Text clipboard A/B/A repeats
 also pass after the r8 boot.
 
 A separate r7 failure appeared when booting the exact restored disk from
-`Restored 世界`: QEMU could not open `vm/qemu.log`, then CPU fallback failed for
+`Restored ä¸ç`: QEMU could not open `vm/qemu.log`, then CPU fallback failed for
 the same reason. The disk itself has the expected checksum. A packaged-binary
 regression also reproduces Unicode path failure in r8 qemu-img. Commit 3ca83dc
 adds process UTF-8 manifest settings and initializes the UCRT character locale
@@ -270,7 +270,7 @@ no host sleep/reboot has occurred. User availability for physical keyboard,
 UAC/firewall, and host sleep/wake checks was requested while testing continues.
 
 September 13 afternoon continuation: malformed Settings repair was exercised on
-`Restored 世界`. Declining preserved the exact malformed file. Accepting retained
+`Restored ä¸ç`. Declining preserved the exact malformed file. Accepting retained
 it under `preferences-before-repair-3597579487/settings.json` with SHA256
 `215579e970e8fb878cd2546bad369026d71bb6d856f125195c494112baf37c60`, then
 restored defaults. The native Settings form showed automatic rendering, one
@@ -366,7 +366,7 @@ Public runtime/guest pins and signed release artifacts remain unchanged.
 
 A direct Windows Vulkan probe establishes the default-video allocation cause
 on this driver. A 64 KiB ordinary transfer-source buffer allows memory types
-0�3, including three host-visible types. The otherwise identical buffer with
+03, including three host-visible types. The otherwise identical buffer with
 OPAQUE_WIN32 external-memory support allows only type 0, which is device-local
 and not host-visible. This matches the guest's memoryTypeBits=0x1 failure.
 Venus currently requests Win32-exportable buffers because its host-visible
@@ -427,3 +427,48 @@ creation regression fails on r11 and passes the proposed correction through
 three recreation cycles and the software path. Physical r12 acceptance is
 pending; r11 is not a complete multi-display pass. SDL's documented context
 sharing behavior is described in https://wiki.libsdl.org/SDL2/SDL_GLattr.
+
+### Storage block during the resumed recovery round
+
+R12 runtime build 34770918856 is compiling commit 53093ed; all required PR
+checks at that commit pass. A native probe using the bundled SDL2 library and
+this AMD GPU confirms that a recreated secondary GL context cannot see the
+primary texture without explicit sharing, and can see it with sharing enabled.
+Evidence: probe-sdl-context-sharing.py and native-sdl-context-sharing.json.
+The complete r12 guest/visual retest remains pending.
+
+R11 fullscreen monitoring recorded ten successful samples (minutes 0 through
+9), with stable QEMU/guest boot identity, working SSH and correct persistent
+fixture hashes. It was deliberately ended by QMP powerdown because secondary
+windows already failed visual acceptance and recovery work needed the lifecycle
+listener. The monitor's subsequent missing-process error is an intentional-stop
+consequence, not a spontaneous crash or a one-hour pass. See
+r11-endurance-intentional-stop.json and the endurance samples/result files.
+
+The real move of fresh-r7 into Move 世界/TryOmarchy passed cancellation: the
+source remained, no destination was published and staging was empty. Retrying
+the full move completed copying but hit ERROR_DISK_FULL while reading the new
+disk for final verification. C: reports zero free bytes. The journal remains
+pending in phase verified, redirects remain empty, and both source and new
+copy are retained. Do not delete either or edit the journal to force activation.
+After space is available, normal launcher recovery must reverify the new copy,
+activate the redirect, boot successfully and verify persistent files before
+retained-source cleanup can be tested.
+
+NTFS allocated-range queries show the destination disk still sparse, with
+6,839,468,032 allocated bytes for its 25,769,803,776-byte logical disk; its
+factory rootfs uses 5,915,803,648 allocated bytes. The source counterparts use
+7,148,994,560 and 5,931,794,432 bytes. These observations do not establish a
+space-estimation defect: the reason the remaining host space disappeared is
+not yet determined. Source disk inventory SHA256 is
+f04a8e8ae3829d35ada8b69cd89ceda8229676acc91f6e18f18f93cea66577f9.
+The source is authoritative until recovery activates the destination.
+
+Automatic approval review rejected removal of the redundant runtime-r10
+extraction with the reason "blocked by policy". It was not retried through
+another tool. The user was asked to free at least 15 GiB outside the acceptance
+folder or provide another drive. All guest processes are stopped. No host
+reboot, driver change or clock change was performed. Writes and further guest
+boots are paused until storage is available; release acceptance remains blocked.
+This report update was committed through the GitHub API because C: is full.
+After freeing space, fast-forward the local branch before recording more work.
