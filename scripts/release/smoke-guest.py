@@ -106,6 +106,8 @@ def main() -> None:
     if args.compat_revision >= 19:
         FACT_CHECKS["file-transfer"] = "file-transfer --help >/dev/null 2>&1 && echo present || echo missing"
         EXPECTED_FACTS["file-transfer"] = "present"
+        FACT_CHECKS["file-transfer-window"] = "test -x /usr/local/bin/file-transfer-window && desktop-file-validate /usr/share/applications/try-omarchy-file-transfers.desktop && python -c \"import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk, Gdk\" >/dev/null 2>&1 && echo present || echo missing"
+        EXPECTED_FACTS["file-transfer-window"] = "present"
 
     login_delay = args.login_delay if args.login_delay is not None else (60 if args.accel == "tcg" else 0)
     if login_delay < 0:
