@@ -785,7 +785,13 @@ func supervise(cfg *config, cmdline string) bool {
 		}
 		qemuPid.Store(uint32(proc.Process.Pid))
 		exited := make(chan error, 1)
-		go func() { exited <- proc.Wait() }()
+		go func() {
+			err := proc.Wait()
+			if err != nil {
+				logf("QEMU process exited with error: %v", err)
+			}
+			exited <- err
+		}()
 
 		// Do NOT touch QMP during early guest boot: a monitor connection in
 		// the first seconds reliably wedges QEMU's main loop under WHPX (the
@@ -988,7 +994,11 @@ drained:
 		logf("guest rebooted - relaunching")
 		return true
 	}
-	logf("guest powered off (%s)", reason)
+	if reason == "" {
+		logf("QEMU exited without a guest shutdown event")
+	} else {
+		logf("guest powered off (%s)", reason)
+	}
 	return false
 }
 

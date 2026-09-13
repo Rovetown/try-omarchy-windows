@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r10",
+  "name": "winq-emu-alpha10-source-r11",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -49,6 +49,10 @@
       {
         "file": "patches/qemu/0010-reset-sdl-scanout-before-destroying-secondary-window.patch",
         "sha256": "2e74e6c99704e1c1894e3702f2756dfed0609fcb8a9c8b9628bfde0ca53a15a6"
+      },
+      {
+        "file": "patches/qemu/0011-ignore-stale-sdl-window-input.patch",
+        "sha256": "1e2054dbd2ac37f37fa7163af269c3629c386a6f5ead3a618ef544b6ef641bdf"
       }
     ]
   },

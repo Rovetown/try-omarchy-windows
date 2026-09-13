@@ -326,3 +326,28 @@ destroys its framebuffer while the context still exists, before destroying the
 secondary window. The extracted real C helper regression aborts on r9 and passes
 on the correction, including three disable/reactivate cycles. Physical runtime
 acceptance of r10 is still pending. CPU fallback preserved the installation.
+
+The post-change Windows suite passed 336 top-level tests and skipped 16 with
+interactive opt-ins disabled (`windows-post-multidisplay-tests.jsonl`). This is
+separate from the earlier 342-test interactive run. All required PR checks pass
+at 97710cf. Diagnostics creation on the real running installation passed:
+installation path redacted, no disk images/private key, original startup failure
+retained. Its 13 entries and digest are in `diagnostics-live-verification.json`.
+
+Native close-button activation opened the shutdown confirmation while QEMU
+remained running. The UI automation helper could not address the cross-process
+owned dialog, so accepting/declining remains a manual gate; the file named
+`close-declined-running.json` only proves the guest was still running, not that
+the decline action succeeded. QMP was used for the subsequent clean shutdown.
+
+Three-display CPU fullscreen startup failed repeatedly after readiness, without
+UI input. An attached debugger recorded 0xc0000094 (integer divide by zero) at
+QEMU module offset 0x3390e4. The packaged debug symbols resolve this to
+`handle_mousemotion`, ui/sdl2.c:543. Stale SDL window IDs resolved to NULL and
+incorrectly matched an inactive output; the handler divided by a zero window
+size. Recipe r11 rejects stale IDs and guards zero sizes/missing surfaces in
+both motion and button handlers. The real extracted C regression fails on the
+old lookup and passes the correction, including normal coordinate scaling.
+The launcher now also records nonzero QEMU exit status and no longer describes
+an exit without a shutdown event as a confirmed guest poweroff. Windowed
+three-display CPU mode remained running during this investigation.
