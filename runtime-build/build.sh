@@ -108,6 +108,7 @@ python "$recipe/test-file-drop.py" "$qemu_source/ui/sdl2.c"
 python "$recipe/test-windows-share.py" "$qemu_source/hw/9pfs/9p-util-win32.c"
 python "$recipe/test-sdl-scanout.py" "$qemu_source/ui/sdl2-gl.c"
 python "$recipe/test-sdl-input.py" "$qemu_source/ui/sdl2.c"
+python "$recipe/test-sdl-context.py" "$qemu_source/ui/sdl2.c"
 python "$qemu_source/scripts/qapi-gen.py" -o "$work/qapi-validation" -b "$qemu_source/qapi/qapi-schema.json"
 
 virgl_build="$work/virgl-build"

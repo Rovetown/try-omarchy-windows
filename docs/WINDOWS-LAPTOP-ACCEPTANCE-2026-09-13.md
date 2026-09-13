@@ -34,7 +34,7 @@ Hyper-V role is disabled. Detailed facts are in `host-inventory.json`.
 | Check | Result | Evidence |
 | --- | --- | --- |
 | Runtime archive checksum and source/binary recipe verification | Pass | `runtime-build/verify.py` reports 10 required files and corresponding source verified |
-| Runtime version and accelerator inventory | Pass | QEMU 11.0.0; TCG and WHPX listed; not yet a WHPX boot result |
+| Runtime version and accelerator inventory | Pass | QEMU 11.0.0; TCG and WHPX listed; real WHPX CPU/GPU boots recorded below |
 | Compressed guest and metadata checksums | Pass | `guest-verification.json` |
 | Decompressed rootfs stream checksum and length | Pass | `rootfs-stream-verification.txt`: 7,516,192,768 bytes, exact expected SHA256; no extra raw image retained |
 | Current launcher build and Windows vet | Pass | Launcher SHA256 `512f728b67190e8f3d441102264780b675f7adbd406e8018e13ab4cae9fce319`; `launcher-hash.json`; vet rerun after fixes |
@@ -50,10 +50,14 @@ Hyper-V role is disabled. Detailed facts are in `host-inventory.json`.
 | Real guest image clipboard | Pass both directions | `image-clipboard-host-to-guest.json`, `image-clipboard-guest-to-host.txt`; distinct size/pixel fixtures |
 | Shared folder | r7 fails; r8 fixes live retest | `r8-share-retest.txt`, `r8-share-crud.json`, host hash: Unicode read/write/rename/delete and current/explicit timestamps |
 | Guest network | Pass localhost SSH and outgoing HTTPS | `shared/guest-facts.txt`; production QEMU user network |
-| Physical USB | Pending hardware | `usb-host-inventory.json` exposes built-in camera and Bluetooth only |
+| Physical USB | Built-in camera discovery/attach/release passes; video usability fails | Guest USB configuration fails with error -32; no video device. External storage/serial hardware remains unavailable |
 | Audio routing | Pass host-session playback/capture lifecycle; subjective sound/device-switch tests open | `audio-tone.json`, `audio-capture.json`, `capture-byte-count.txt`, `audio-after-capture.json` |
-| Backup and restore | Pass archive creation, cancellation, full disk hash verification; restored boot pending | `backup-manifest-check.json`, `restored-disk-verification.json`, `restore-cancellation.json` |
-| Long session, idle CPU, sleep/resume | Pending | |
+| Backup and restore | Pass creation, cancellation, full disk hash verification, restored Unicode-path boot on r9 | Persistent fixture hashes also survive disk growth, reclaim and relaunch |
+| Awake idle / video CPU | Five-minute samples pass; default Vulkan playback fails | Idle mean host CPU 0.611639%; explicit OpenGL video mean 11.30079% |
+| One-hour endurance and host sleep/resume | Pending | Earlier individual sessions lasted less than one hour; host has not slept or rebooted |
+| Multiple displays | Launcher hostmem typing fixed; r10/r11 runtime fixes awaiting combined live retest | GPU secondary-output teardown assertion and CPU fullscreen stale-input divide-by-zero reproduced |
+| Launcher TCP/UDP forwards | Pass localhost round trips | `r9-launcher-forwards.json`; LAN/firewall remains separate |
+| Settings repair and diagnostics | Pass real installation | Decline preserves malformed bytes; repair retains backup; diagnostics redact path and omit disks/private key |
 
 An initial test invocation overlapped Go archive extraction and failed to find
 standard-library files. It is retained in `toolchain-extraction-race.jsonl` as a
@@ -351,3 +355,75 @@ old lookup and passes the correction, including normal coordinate scaling.
 The launcher now also records nonzero QEMU exit status and no longer describes
 an exit without a shutdown event as a confirmed guest poweroff. Windowed
 three-display CPU mode remained running during this investigation.
+
+
+### Combined r11 acceptance preparation
+
+Required PR checks pass at 57c837f. Runtime r10 build 34768261746 passed;
+combined r11 build 34768987337 is in progress. The locally built r11 launcher
+includes the nonzero-exit diagnostic correction and passes Windows vet.
+Public runtime/guest pins and signed release artifacts remain unchanged.
+
+A direct Windows Vulkan probe establishes the default-video allocation cause
+on this driver. A 64 KiB ordinary transfer-source buffer allows memory types
+0–3, including three host-visible types. The otherwise identical buffer with
+OPAQUE_WIN32 external-memory support allows only type 0, which is device-local
+and not host-visible. This matches the guest's memoryTypeBits=0x1 failure.
+Venus currently requests Win32-exportable buffers because its host-visible
+allocations must cross the virtualization boundary. Removing that declaration
+without replacing the memory-sharing design would not be a validated fix.
+Evidence: `probe-vulkan-memory.py` and `host-vulkan-buffer-memory.json`.
+The probe creates/destroys buffer objects but does not allocate GPU memory or
+change drivers. Python Vulkan bindings are isolated under the test tools.
+See the [Vulkan external-buffer contract](https://docs.vulkan.org/refpages/latest/refpages/source/VkExternalMemoryBufferCreateInfo.html)
+and [buffer memory requirements](https://docs.vulkan.org/refpages/latest/refpages/source/vkGetBufferMemoryRequirements.html).
+
+The five-minute explicit OpenGL video run completed with exit 0, mean host CPU
+11.30079% and maximum 13.82146%. This does not close default Vulkan playback.
+The r8 early disk write error has not recurred on restored r9 boots, whose
+persistent fixture hashes remain correct; its original cause is unresolved.
+The actual snapshot Create operation refused with 34.7 GiB required and 9.1 GiB
+available. The store contains zero entries after failure, with no pending
+snapshot directory. Native dialog evidence: snapshot-low-space.jpg. This proves
+safe low-space handling, not a successful full snapshot/rollback round trip.
+
+Runtime r10 from build 34768261746 passed full local archive/provenance
+verification against the 97710cf recipe. Installed windowed QEMU SHA256 is
+b952180c4c4c8eb22a6c044b81671c4172f72ad9d2656af12dcfb7da31121c45.
+The restored Unicode-path installation reached GPU userspace at 16:50:33 and
+committed its authenticated runtime update. Three guest DPMS off/on cycles
+returned both enabled outputs with unchanged persistent fixture hashes and no
+QEMU assertion. The helper's final no-error grep initially encountered a CRLF
+shell terminator; a separate corrected kernel scan passed and the helper was
+normalized to LF for the next run. Evidence retains that harness failure.
+Only one native window was enumerated after readiness, so this does not yet
+establish two visible native outputs. R11 is the next integrated retest.
+
+### Resumed combined runtime round
+
+The host wall clock now precedes earlier log timestamps. Endurance timing uses
+Stopwatch elapsed time rather than wall-clock subtraction. The prior QEMU and
+localhost asset server were no longer running; the original loopback-only
+asset service was restarted. No host reboot or clock change was performed by
+this acceptance agent. The active laptop GitHub credential is tsouth89 with
+repository push permission; the earlier lab handoff's btsouth account is not
+present in this session.
+
+Runtime r11 build 34768987337 passed CI and full local archive verification.
+The installed executable SHA256 is
+f155a361d4d275b0c81ac1e595dee1e515187e1fff98de1221aea4695d3e42b5.
+Three-display fullscreen GPU boot reached userspace at current host time
+12:06:53, committed its authenticated runtime update, and passed three DPMS
+cycles with all guest outputs enabled and persistent hashes intact. All three
+native windows remain present: the stale-event fix closes the disappearing
+window symptom as well as the immediate crash in this run.
+
+Visual acceptance nevertheless fails: secondary native GPU windows are black,
+while `grim -o Virtual-3` captures the correct rendered guest desktop. Native
+and guest screenshots are retained. R12 explicitly makes the primary context
+current before creating a secondary SDL GL context and enables sharing with
+that context, including after display recreation. The extracted real window
+creation regression fails on r11 and passes the proposed correction through
+three recreation cycles and the software path. Physical r12 acceptance is
+pending; r11 is not a complete multi-display pass. SDL's documented context
+sharing behavior is described in https://wiki.libsdl.org/SDL2/SDL_GLattr.

@@ -1,0 +1,19 @@
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -126,6 +126,16 @@
+         SDL_SetHint(SDL_HINT_RENDER_DRIVER, driver);
+         SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
+ 
++        /* Virgl scanout textures belong to the primary console's share
++         * group. A disabled secondary console is recreated after its old
++         * context was detached, so sharing with whatever happens to be
++         * current can create an unrelated group and black scanouts.
++         */
++        struct sdl2_console *primary = &sdl2_console[0];
++        if (scon != primary && primary->real_window && primary->winctx) {
++            SDL_GL_MakeCurrent(primary->real_window, primary->winctx);
++            SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
++        }
+         scon->winctx = SDL_GL_CreateContext(scon->real_window);
+         SDL_GL_SetSwapInterval(0);
+     } else {
