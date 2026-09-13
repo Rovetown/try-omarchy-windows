@@ -146,7 +146,7 @@ func TestUnicodeShortcutOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target != next || args != "-settings" {
+	if !sameShortcutTarget(target, next) || args != "-settings" {
 		t.Fatalf("moved link = %q %q; initial=%q %q err=%v; expected old=%q; callback=%v", target, args, initialTarget, initialArgs, initialErr, old, changed)
 	}
 	after, err := os.ReadFile(paths[1])
@@ -164,5 +164,29 @@ func TestUnicodeShortcutOwnership(t *testing.T) {
 	}
 	if _, err := os.Stat(paths[1]); err != nil {
 		t.Fatal("foreign shortcut removed", err)
+	}
+}
+
+func TestShortcutOwnershipAcceptsFileAliases(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "TryOmarchy.exe")
+	alias := filepath.Join(dir, "alias.exe")
+	foreign := filepath.Join(dir, "foreign.exe")
+	for _, path := range []string{target, foreign} {
+		if err := os.WriteFile(path, []byte("same bytes, different identity"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Link(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	if !sameShortcutTarget(alias, target) {
+		t.Fatal("file alias was not recognized")
+	}
+	if sameShortcutTarget(foreign, target) {
+		t.Fatal("different executable was treated as owned")
+	}
+	if !sameShortcutTarget(filepath.Join(dir, "missing.exe"), filepath.Join(dir, "missing.exe")) {
+		t.Fatal("literal ownership of a removed target was lost")
 	}
 }

@@ -156,7 +156,7 @@ func changeOwnedShortcuts(paths, targets []string, change func(string, string) e
 			return err
 		}
 		for _, owned := range targets {
-			if strings.EqualFold(target, owned) {
+			if sameShortcutTarget(target, owned) {
 				if err := change(path, args); err != nil {
 					return err
 				}
@@ -165,4 +165,19 @@ func changeOwnedShortcuts(paths, targets []string, change func(string, string) e
 		}
 	}
 	return nil
+}
+
+// Shell links can expand a short (8.3) path even when SetPath received the
+// short spelling. Compare existing file identity as well as literal paths.
+// Keep the literal comparison for a retained link whose target is now absent.
+func sameShortcutTarget(target, owned string) bool {
+	if pathsEqual(target, owned) {
+		return true
+	}
+	actual, err := os.Stat(target)
+	if err != nil {
+		return false
+	}
+	expected, err := os.Stat(owned)
+	return err == nil && os.SameFile(actual, expected)
 }
