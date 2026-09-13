@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r13",
+  "name": "winq-emu-alpha10-source-r14",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -71,6 +71,10 @@
       {
         "file": "patches/virglrenderer/0001-resolve-windows-handle-tokens-before-crt.patch",
         "sha256": "0419c3e3e8ada85e7777a8beb0d8e9f9bb918c904bb33546039161ef74e05d73"
+      },
+      {
+        "file": "patches/virglrenderer/0002-import-windows-host-memory-for-internal-resources.patch",
+        "sha256": "13de141871b0fd7e3dd83cb86bd65cc4db1313072e17fc056d7035495e3e2042"
       }
     ]
   }
