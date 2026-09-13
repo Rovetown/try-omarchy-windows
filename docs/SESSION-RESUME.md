@@ -6,14 +6,21 @@ proper release notes and external contributor acknowledgments. Ship the tested
 improvements now and continue the remaining full-feature work afterward. This
 supersedes the earlier instruction below against an intermediate preview.
 Release preparation pins the exact tested r15 runtime and compatibility-20 guest;
-the signed-package smoke and protected publish workflow remain the final gates.
+the signed-package smoke passed on merged commit
+`5e8e43bb9ce79176e5651fd19379808da8e9570f` (Azure signing-check
+`34787825540`). Publication run `34788070204` passed and
+[v0.0.18-preview is public and Latest](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview).
+An unauthenticated Latest download on this laptop passed Authenticode, checksum,
+version, source-manifest, and signed-update verification. The guest and
+loopback asset server are stopped; the final signed evidence is recorded at the
+end of the laptop acceptance report.
 
 Physical Windows continuation on September 13, 2026 is recorded in
 [WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md).
 Read that report first for laptop paths, current fixes, test evidence and the
 remaining live Windows acceptance work. The sections below retain the prior lab handoff.
 
-Latest laptop checkpoint: full runtime r15 build `34781229515` and guest
+Earlier unsigned laptop checkpoint (retained for recovery): runtime r15 build `34781229515` and guest
 compatibility-20 build `34781901160` pass integrated AMD Vulkan playback and
 update delivery. Launcher short/long-path shortcut ownership is fixed in
 `7a15327`; current CI passes. The guest is cleanly stopped. Use
@@ -21,11 +28,11 @@ update delivery. Launcher short/long-path shortcut ownership is fixed in
 with the existing `Move 世界\TryOmarchy` installation and explicitly bypass the
 old `C:\WINQ-EMU` discovery path (`-winq` can name the nonexistent acceptance
 `bundled-only` path to select the verified bundled runtime). The local manifest
-is under `http://127.0.0.1:18080/v0.0.18-preview`; this is not a published release.
+was served under `http://127.0.0.1:18080/v0.0.18-preview` before release preparation.
 Portable lifecycle still lacks sufficient free space under its current staging
 requirements. Automatic review denied removal of the completed retained rollback
 copy; do not retry that deletion through another route. Read the report's final
-checkpoint before creating more disks. No host reboot or public pin change occurred.
+checkpoint before creating more disks. No host reboot occurred.
 
 Updated September 12, 2026, after the native file-transfer and recovery round.
 
