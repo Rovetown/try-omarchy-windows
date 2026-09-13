@@ -61,7 +61,7 @@ func createPortableCopyUsingTool(dir, destination, launcher, tool string, report
 		return err
 	}
 	data := filepath.Join(bundle, "data")
-	if err := stagePortableData(dir, data, stage, tool, report); err != nil {
+	if err := stagePortableData(dir, data, tool, report); err != nil {
 		return err
 	}
 	if err := copyLauncher(launcher, filepath.Join(bundle, stableLauncherName), os.Rename); err != nil {

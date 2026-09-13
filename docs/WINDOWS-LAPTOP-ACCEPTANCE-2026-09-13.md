@@ -1066,3 +1066,42 @@ the active raw disk's allocated ranges total 6,892,027,904 bytes. Read-only scan
 found no newly created large acceptance artifact explaining the change. The
 guarded rejection is not a successful installed-guest portable lifecycle test.
 No previously denied deletion was retried, and no Windows reboot was attempted.
+
+### Direct QCOW2 copies and additional storage inventory
+
+Direct portable creation now also handles standalone and factory-backed QCOW2.
+QEMU receives explicit JSON format/backing descriptors, avoiding probing or
+external backing chains. Factory hashes are verified before and after conversion.
+QEMU measures required allocated clusters for the destination; logical comparison
+and independent-image inspection remain publication gates. No intermediate raw
+disk or archive is created for either supported input format.
+
+Small real-r15-QEMU tests cover a 32 MiB factory-backed disk with a distinct 4 KiB
+overlay write, a second-generation
+standalone copy, unchanged source overlay bytes, rejected corrupted factory data,
+and preserved original data after the original factory is changed. They run with
+only 4 MiB available above the reserve and require no large acceptance copy.
+The native Windows full Go suite passed (28.713 seconds); vet with
+`-unsafeptr=false` also passed. The overlay-write fixture uses a QMP handshake
+and quiet qemu-io output to avoid Windows monitor startup races.
+
+The read-only `storage-inventory.py`/`storage-inventory.json` inventory counts
+allocated bytes and deduplicates hard links. Acceptance artifacts occupy about
+58.2 GB. The current disk, old `fresh` installation and retained rollback images
+account for much of this. The cause of the preceding free-space change remains
+unresolved.
+
+Automatic review rejected a new cleanup command with only `blocked by policy`.
+It did not execute. Do not retry these additional targets through another tool,
+API, script or subset. All are relative to the September 13 acceptance root:
+
+- `Move 世界/TryOmarchy/checkpoints/184b4dabfb0abc1c2fbbecb75d30bb61`
+- `combined-r12-guest19`, `guest19-r2`
+- `runtime-r7`, `runtime-r8`, `runtime-r9`, `runtime-r13`, `runtime-utf8-experiment`
+- `runtime-artifacts`, `runtime-r8-artifacts`, `runtime-r9-artifacts`,
+  `runtime-r11-artifacts`, `runtime-r12-artifacts`, `runtime-r13-artifacts`
+
+The completed snapshot archive was rehashed before the proposed cleanup and still
+matches `a8aada049e0590441473b90165872ca2ad61c487d81ae576baed95ba154dde88`.
+No payload copy was retried. C: remains near 4.8 GiB free; physical portable
+creation needs cleanup by the user or a separate suitable destination.

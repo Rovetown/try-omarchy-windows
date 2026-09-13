@@ -1,5 +1,13 @@
 # Resume here
 
+Latest continuation: `codex/portable-direct-qcow2` extends direct portable copying
+to standalone and factory-backed QCOW2 inputs, with backing verification before
+and after conversion. Small real-QEMU copy and corruption tests pass. The actual
+installed-guest portable lifecycle is still blocked by host free space.
+An additional cleanup proposal was rejected by automatic review; **do not retry
+those deletions through another route**. Exact additional targets are recorded
+at the end of the acceptance report. No cleanup ran.
+
 Post-release work: `codex/portable-space-efficiency` replaces raw-installation
 portable creation's archive/raw staging with direct verified QCOW2 conversion.
 Real-QEMU compact-copy, space rejection, cancellation, source preservation and
