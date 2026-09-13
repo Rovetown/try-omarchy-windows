@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r7",
+  "name": "winq-emu-alpha10-source-r8",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -37,6 +37,10 @@
       {
         "file": "patches/qemu/0007-report-native-file-drops.patch",
         "sha256": "7711bd1ac183d09ed2c6f75c8b0e688a314881efa4a94ad379acd4b851e8c0ab"
+      },
+      {
+        "file": "patches/qemu/0008-preserve-windows-share-unicode-and-times.patch",
+        "sha256": "47b9e13191858cdeefaa7407d4049e273dd8888cfc472008b70d431cea9ef14f"
       }
     ]
   },

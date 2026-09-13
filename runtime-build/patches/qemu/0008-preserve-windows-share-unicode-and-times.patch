@@ -1,0 +1,504 @@
+--- a/hw/9pfs/9p-util-win32.c
++++ b/hw/9pfs/9p-util-win32.c
+@@ -55,6 +55,7 @@
+ 
+ #include <windows.h>
+ #include <dirent.h>
++#include <glib/gstdio.h>
+ 
+ #define V9FS_MAGIC  0x53465039  /* string "9PFS" */
+ 
+@@ -67,7 +68,7 @@
+  */
+ struct dir_win32_entry {
+     QSLIST_ENTRY(dir_win32_entry) node;
+-    struct _finddata_t dd_data;
++    struct _wfinddata_t dd_data;
+ };
+ 
+ struct dir_win32 {
+@@ -102,6 +103,101 @@
+     return EIO;
+ }
+ 
++
++#ifndef UTIME_NOW
++#define UTIME_NOW ((1L << 30) - 1L)
++#define UTIME_OMIT ((1L << 30) - 2L)
++#endif
++
++static HANDLE create_file_utf8(const char *path, DWORD access, DWORD sharing,
++                               LPSECURITY_ATTRIBUTES security, DWORD creation,
++                               DWORD flags, HANDLE template)
++{
++    g_autofree gunichar2 *wide = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
++    if (!wide) {
++        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
++        return INVALID_HANDLE_VALUE;
++    }
++    return CreateFileW((WCHAR *)wide, access, sharing, security, creation,
++                       flags, template);
++}
++
++static DWORD file_attributes_utf8(const char *path)
++{
++    g_autofree gunichar2 *wide = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
++    if (!wide) {
++        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
++        return INVALID_FILE_ATTRIBUTES;
++    }
++    return GetFileAttributesW((WCHAR *)wide);
++}
++
++static BOOL delete_file_utf8(const char *path)
++{
++    g_autofree gunichar2 *wide = g_utf8_to_utf16(path, -1, NULL, NULL, NULL);
++    if (!wide) {
++        SetLastError(ERROR_NO_UNICODE_TRANSLATION);
++        return FALSE;
++    }
++    return DeleteFileW((WCHAR *)wide);
++}
++
++/* GStatBuf and struct stat need not have the same Windows CRT layout. */
++static int stat_utf8(const char *path, struct stat *st)
++{
++    GStatBuf wide;
++    int ret = g_stat(path, &wide);
++    if (ret == 0) {
++        st->st_dev = wide.st_dev;
++        st->st_ino = wide.st_ino;
++        st->st_mode = wide.st_mode;
++        st->st_nlink = wide.st_nlink;
++        st->st_uid = wide.st_uid;
++        st->st_gid = wide.st_gid;
++        st->st_rdev = wide.st_rdev;
++        st->st_size = wide.st_size;
++        st->st_atime = wide.st_atime;
++        st->st_mtime = wide.st_mtime;
++        st->st_ctime = wide.st_ctime;
++    }
++    return ret;
++}
++
++/* NULL FILETIME means preserve; special POSIX nanoseconds are not a date. */
++static int set_times_win32(HANDLE file, const struct timespec times[2])
++{
++    FILETIME now, values[2];
++    const FILETIME *pointers[2] = { NULL, NULL };
++    const int64_t epoch = 116444736000000000LL;
++
++    GetSystemTimeAsFileTime(&now);
++    for (int i = 0; i < 2; i++) {
++        if (!times || times[i].tv_nsec == UTIME_NOW) {
++            values[i] = now;
++        } else if (times[i].tv_nsec == UTIME_OMIT) {
++            continue;
++        } else {
++            ULARGE_INTEGER value;
++            if (times[i].tv_nsec < 0 || times[i].tv_nsec >= 1000000000L ||
++                times[i].tv_sec < -11644473600LL ||
++                times[i].tv_sec > (INT64_MAX - epoch - 9999999) / 10000000) {
++                errno = EINVAL;
++                return -1;
++            }
++            value.QuadPart = times[i].tv_sec * 10000000LL + epoch +
++                             times[i].tv_nsec / 100;
++            values[i].dwLowDateTime = value.LowPart;
++            values[i].dwHighDateTime = value.HighPart;
++        }
++        pointers[i] = &values[i];
++    }
++    if (!SetFileTime(file, NULL, pointers[0], pointers[1])) {
++        errno = win32_error_to_posix(GetLastError());
++        return -1;
++    }
++    return 0;
++}
++
+ /*
+  * build_ads_name - construct Windows ADS name
+  *
+@@ -185,39 +281,35 @@
+  */
+ char *get_full_path_win32(HANDLE hDir, const char *name)
+ {
+-    g_autofree char *full_file_name = NULL;
+-    DWORD total_size;
+-    DWORD name_size;
++    g_autofree WCHAR *wide = NULL;
++    g_autofree char *path = NULL;
++    DWORD length;
++    const char *normalized;
+ 
+     if (hDir == INVALID_HANDLE_VALUE) {
++        errno = EBADF;
+         return NULL;
+     }
+-
+-    full_file_name = g_malloc0(NAME_MAX);
+-
+-    /* get parent directory full file name */
+-    name_size = GetFinalPathNameByHandle(hDir, full_file_name,
+-                                         NAME_MAX - 1, FILE_NAME_NORMALIZED);
+-    if (name_size == 0 || name_size > NAME_MAX - 1) {
++    length = GetFinalPathNameByHandleW(hDir, NULL, 0, FILE_NAME_NORMALIZED);
++    if (!length) {
++        errno = win32_error_to_posix(GetLastError());
+         return NULL;
+     }
+-
+-    /* full path returned is the "\\?\" syntax, remove the lead string */
+-    memmove(full_file_name, full_file_name + 4, NAME_MAX - 4);
+-
+-    if (name != NULL) {
+-        total_size = strlen(full_file_name) + strlen(name) + 2;
+-
+-        if (total_size > NAME_MAX) {
+-            return NULL;
+-        }
+-
+-        /* build sub-directory file name */
+-        strcat(full_file_name, "\\");
+-        strcat(full_file_name, name);
+-    }
+-
+-    return g_steal_pointer(&full_file_name);
++    wide = g_new0(WCHAR, length + 1);
++    if (!GetFinalPathNameByHandleW(hDir, wide, length + 1,
++                                   FILE_NAME_NORMALIZED)) {
++        errno = win32_error_to_posix(GetLastError());
++        return NULL;
++    }
++    path = g_utf16_to_utf8((gunichar2 *)wide, -1, NULL, NULL, NULL);
++    if (!path) {
++        errno = EILSEQ;
++        return NULL;
++    }
++    /* Keep the same normalized drive path used by the root containment check. */
++    normalized = g_str_has_prefix(path, "\\\\?\\") ? path + 4 : path;
++    return name ? g_strconcat(normalized, "\\", name, NULL) :
++                  g_strdup(normalized);
+ }
+ 
+ /*
+@@ -249,7 +341,7 @@
+         return -1;
+     }
+ 
+-    hStream = CreateFile(ads_file_name, GENERIC_READ, FILE_SHARE_READ, NULL,
++    hStream = create_file_utf8(ads_file_name, GENERIC_READ, FILE_SHARE_READ, NULL,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+     if (hStream == INVALID_HANDLE_VALUE) {
+         /* AUDIT F1: upstream Bin Meng v4 only trapped ERROR_FILE_NOT_FOUND
+@@ -303,7 +395,7 @@
+         return -1;
+     }
+ 
+-    fd = open(full_file_name1, flags, mode);
++    fd = g_open(full_file_name1, flags, mode);
+     /* AUDIT F2: fd==0 is a legitimate result (stdin slot) and was
+      * previously skipping the reparse-point check, letting a symlink-
+      * to-directory through. Also, on reparse-point rejection we
+@@ -315,7 +407,7 @@
+         hFile = (HANDLE)_get_osfhandle(fd);
+ 
+         full_file_name2 = get_full_path_win32(hFile, NULL);
+-        attribute = GetFileAttributes(full_file_name2);
++        attribute = file_attributes_utf8(full_file_name2);
+ 
+         /* check if it is a symbolic link */
+         if ((attribute == INVALID_FILE_ATTRIBUTES)
+@@ -355,7 +447,7 @@
+     }
+ 
+     /* open file to lock it */
+-    hFile = CreateFile(full_file_name, GENERIC_READ,
++    hFile = create_file_utf8(full_file_name, GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL,
+                        OPEN_EXISTING,
+@@ -368,7 +460,7 @@
+         goto out;
+     }
+ 
+-    attribute = GetFileAttributes(full_file_name);
++    attribute = file_attributes_utf8(full_file_name);
+ 
+     if (attribute == INVALID_FILE_ATTRIBUTES) {
+         err = EACCES;
+@@ -380,7 +472,7 @@
+         is_symlink = 1;
+     }
+ 
+-    ret = stat(full_file_name, statbuf);
++    ret = stat_utf8(full_file_name, statbuf);
+ 
+     if (GetFileInformationByHandle(hFile, &file_info) == 0) {
+         err = win32_error_to_posix(GetLastError());
+@@ -448,7 +540,7 @@
+         return ret;
+     }
+ 
+-    ret = mkdir(full_file_name);
++    ret = g_mkdir(full_file_name, mode);
+ 
+     return ret;
+ }
+@@ -482,7 +574,7 @@
+     }
+ 
+     /* open file to lock it */
+-    hFile = CreateFile(full_old_name, GENERIC_READ,
++    hFile = create_file_utf8(full_old_name, GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL,
+                        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+@@ -492,7 +584,7 @@
+         goto out;
+     }
+ 
+-    attribute = GetFileAttributes(full_old_name);
++    attribute = file_attributes_utf8(full_old_name);
+ 
+     /* check if it is a symbolic link */
+     if ((attribute == INVALID_FILE_ATTRIBUTES)
+@@ -503,7 +595,7 @@
+ 
+     CloseHandle(hFile);
+ 
+-    ret = rename(full_old_name, full_new_name);
++    ret = g_rename(full_old_name, full_new_name);
+ out:
+     if (err != 0) {
+         errno = err;
+@@ -528,7 +620,6 @@
+     HANDLE hFile = INVALID_HANDLE_VALUE;
+     HANDLE hDir = (HANDLE)_get_osfhandle(dirfd);
+     DWORD attribute;
+-    struct utimbuf tm;
+     int err = 0;
+     int ret = -1;
+ 
+@@ -538,7 +629,7 @@
+     }
+ 
+     /* open file to lock it */
+-    hFile = CreateFile(full_file_name, GENERIC_READ,
++    hFile = create_file_utf8(full_file_name, FILE_WRITE_ATTRIBUTES,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL,
+                        OPEN_EXISTING,
+@@ -551,19 +642,16 @@
+         goto out;
+     }
+ 
+-    attribute = GetFileAttributes(full_file_name);
++    attribute = file_attributes_utf8(full_file_name);
+ 
+     /* check if it is a symbolic link */
+     if ((attribute == INVALID_FILE_ATTRIBUTES)
+         || (attribute & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+-        errno = EACCES;
++        err = EACCES;
+         goto out;
+     }
+ 
+-    tm.actime = times[0].tv_sec;
+-    tm.modtime = times[1].tv_sec;
+-
+-    ret = utime(full_file_name, &tm);
++    ret = set_times_win32(hFile, times);
+ 
+ out:
+     if (hFile != INVALID_HANDLE_VALUE) {
+@@ -605,7 +693,7 @@
+      * open file to prevent other one modify it. FILE_SHARE_DELETE flag
+      * allows remove a file even it is still in opening.
+      */
+-    hFile = CreateFile(full_file_name, GENERIC_READ,
++    hFile = create_file_utf8(full_file_name, GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        NULL,
+                        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+@@ -615,7 +703,7 @@
+         goto out;
+     }
+ 
+-    attribute = GetFileAttributes(full_file_name);
++    attribute = file_attributes_utf8(full_file_name);
+ 
+     /* check if it is a symbolic link */
+     if ((attribute == INVALID_FILE_ATTRIBUTES)
+@@ -629,13 +717,13 @@
+             err = ENOTDIR;
+             goto out;
+         }
+-        ret = rmdir(full_file_name);
++        ret = g_rmdir(full_file_name);
+     } else { /* remove regular file */
+         if ((attribute & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+             err = EISDIR;
+             goto out;
+         }
+-        ret = remove(full_file_name);
++        ret = g_remove(full_file_name);
+     }
+ 
+     /* after last handle closed, file will be removed */
+@@ -704,7 +792,7 @@
+         return -1;
+     }
+ 
+-    attribute = GetFileAttributes(full_file_name);
++    attribute = file_attributes_utf8(full_file_name);
+     if (attribute == INVALID_FILE_ATTRIBUTES) {
+         return -1;
+     }
+@@ -720,7 +808,7 @@
+     }
+ 
+     /* open it */
+-    hSubDir = CreateFile(full_file_name, GENERIC_READ,
++    hSubDir = create_file_utf8(full_file_name, GENERIC_READ,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                          NULL,
+                          OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+@@ -762,7 +850,7 @@
+         return -1;
+     }
+ 
+-    hStream = CreateFile(ads_file_name, GENERIC_READ, FILE_SHARE_READ, NULL,
++    hStream = create_file_utf8(ads_file_name, GENERIC_READ, FILE_SHARE_READ, NULL,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+     if (hStream == INVALID_HANDLE_VALUE) {
+         /* AUDIT F1: upstream Bin Meng v4 only trapped ERROR_FILE_NOT_FOUND
+@@ -814,7 +902,7 @@
+         return -1;
+     }
+ 
+-    hStream = CreateFile(ads_file_name, GENERIC_WRITE, FILE_SHARE_READ, NULL,
++    hStream = create_file_utf8(ads_file_name, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                          CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+     if (hStream == INVALID_HANDLE_VALUE) {
+         errno = EIO;
+@@ -946,7 +1034,7 @@
+      * (returns 0) the function silently returned 0 claiming success.
+      * Rewritten to surface failures: NOT_FOUND → ENODATA (xattr
+      * semantics), everything else → EIO. */
+-    if (DeleteFile(ads_file_name) == 0) {
++    if (delete_file_utf8(ads_file_name) == 0) {
+         DWORD err = GetLastError();
+         errno = (err == ERROR_FILE_NOT_FOUND) ? ENODATA : EIO;
+         return -1;
+@@ -962,7 +1050,7 @@
+  * <dirpath> based on 9pfs mount point.
+  *
+  * Windows POSIX API does not support opening a directory by open(). Only
+- * handle of directory can be opened by CreateFile().
++ * handle of directory can be opened by create_file_utf8().
+  * This function convert handle to fd by _open_osfhandle().
+  *
+  * This function checks the resolved path of <dirpath>. If the resolved
+@@ -1036,7 +1124,8 @@
+     HANDLE hDir = INVALID_HANDLE_VALUE;
+     DWORD attribute;
+     intptr_t dd_handle = -1;
+-    struct _finddata_t dd_data;
++    g_autofree gunichar2 *pattern = NULL;
++    struct _wfinddata_t dd_data;
+ 
+     struct dir_win32 *stream = NULL;
+     struct dir_win32_entry *dir_entry;
+@@ -1049,7 +1138,7 @@
+ 
+     /* open directory to prevent it being removed */
+ 
+-    hDir = CreateFile(full_file_name, GENERIC_READ,
++    hDir = create_file_utf8(full_file_name, GENERIC_READ,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL,
+                       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+@@ -1059,7 +1148,7 @@
+         goto out;
+     }
+ 
+-    attribute = GetFileAttributes(full_file_name);
++    attribute = file_attributes_utf8(full_file_name);
+ 
+     /* symlink is not allow */
+     if (attribute == INVALID_FILE_ATTRIBUTES
+@@ -1084,7 +1173,13 @@
+     strcpy(stream->dd_name, full_file_name);
+     strcat(stream->dd_name, "\\*");
+ 
+-    dd_handle = _findfirst(stream->dd_name, &dd_data);
++    pattern =
++        g_utf8_to_utf16(stream->dd_name, -1, NULL, NULL, NULL);
++    if (!pattern) {
++        err = EILSEQ;
++        goto out;
++    }
++    dd_handle = _wfindfirst((WCHAR *)pattern, &dd_data);
+ 
+     if (dd_handle == -1) {
+         err = errno;
+@@ -1104,7 +1199,7 @@
+         }
+ 
+         prev = dir_entry;
+-        find_status = _findnext(dd_handle, &dd_data);
++        find_status = _wfindnext(dd_handle, &dd_data);
+ 
+         index++;
+     } while (find_status == 0);
+@@ -1193,9 +1288,13 @@
+         return NULL;
+     }
+ 
+-    memcpy(stream->dd_dir.d_name,
+-           stream->current->dd_data.name,
+-           sizeof(stream->dd_dir.d_name));
++    g_autofree char *name = g_utf16_to_utf8(
++        (gunichar2 *)stream->current->dd_data.name, -1, NULL, NULL, NULL);
++    if (!name || strlen(name) >= sizeof(stream->dd_dir.d_name)) {
++        errno = name ? ENAMETOOLONG : EILSEQ;
++        return NULL;
++    }
++    strcpy(stream->dd_dir.d_name, name);
+ 
+     /* Windows does not provide inode number */
+     stream->dd_dir.d_ino = 0;
+@@ -1330,28 +1429,10 @@
+  */
+ int qemu_futimens_win32(int fd, const struct timespec times[2])
+ {
+-    HANDLE hFile = (HANDLE)_get_osfhandle(fd);
+-    FILETIME atime_ft, mtime_ft;
+-    LARGE_INTEGER li;
+-    const LONGLONG EPOCH_DIFF = 116444736000000000LL; /* 1601->1970 in 100ns */
+-
+-    if (hFile == INVALID_HANDLE_VALUE) {
++    HANDLE file = (HANDLE)_get_osfhandle(fd);
++    if (file == INVALID_HANDLE_VALUE) {
+         errno = EBADF;
+         return -1;
+     }
+-    /* times[0] = atime, times[1] = mtime */
+-    li.QuadPart = times[0].tv_sec * 10000000LL + times[0].tv_nsec / 100
+-                  + EPOCH_DIFF;
+-    atime_ft.dwLowDateTime = li.LowPart;
+-    atime_ft.dwHighDateTime = li.HighPart;
+-    li.QuadPart = times[1].tv_sec * 10000000LL + times[1].tv_nsec / 100
+-                  + EPOCH_DIFF;
+-    mtime_ft.dwLowDateTime = li.LowPart;
+-    mtime_ft.dwHighDateTime = li.HighPart;
+-
+-    if (!SetFileTime(hFile, NULL, &atime_ft, &mtime_ft)) {
+-        errno = EINVAL;
+-        return -1;
+-    }
+-    return 0;
+-}
++    return set_times_win32(file, times);
++}
