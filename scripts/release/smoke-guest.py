@@ -98,7 +98,7 @@ def main() -> None:
     parser.add_argument("--network-address", help="verify TCP and UDP forwarding through this host IPv4 address")
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm", help="use TCG for nested Windows runtime testing")
     parser.add_argument("--login-delay", type=float, help="wait for provisioning before the first serial login; TCG defaults to 60 seconds")
-    parser.add_argument("--compat-revision", type=int, default=19, help="expected guest compatibility revision; use 18 for the signed v17 baseline")
+    parser.add_argument("--compat-revision", type=int, default=20, help="expected guest compatibility revision; use 18 for the signed v17 baseline or 19 for guest-r2")
     parser.add_argument("--disk-image", type=Path, help="disposable test disk, for example an expanded QCOW2 overlay of the factory image")
     parser.add_argument("--disk-format", choices=("raw", "qcow2"), default="raw")
     parser.add_argument("--file-transfer-round-trip", action="store_true", help="exercise native Windows bridge file drops with the opt-in Windows test process")
@@ -108,6 +108,9 @@ def main() -> None:
     if not 1 <= args.compat_revision <= 999999:
         parser.error("compatibility revision is invalid")
     FACT_CHECKS["compat-version"] = f'test "$(cat /usr/share/try-omarchy/compat-version)" = "{args.compat_revision}:$(uname -r)" && echo yes || echo no'
+    if args.compat_revision >= 20:
+        FACT_CHECKS["vulkan-environment"] = "sh -c '. /usr/local/lib/try-omarchy/vulkan-env; test \"$VN_PERF\" = no_async_present && test \"$VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING\" = 1' && test -f /usr/share/uwsm/env.d/20-try-omarchy-vulkan && test -f /etc/profile.d/try-omarchy-vulkan.sh && echo yes || echo no"
+        EXPECTED_FACTS["vulkan-environment"] = "yes"
     if args.compat_revision >= 19:
         FACT_CHECKS["file-transfer"] = "file-transfer --help >/dev/null 2>&1 && echo present || echo missing"
         EXPECTED_FACTS["file-transfer"] = "present"

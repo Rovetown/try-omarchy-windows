@@ -12,13 +12,16 @@ creation and restore-as-copy now pass, including whole-disk hash verification
 and a real desktop boot. Active rollback also passes disk, retained-state and
 guest-persistence checks; its Unicode recovery-shortcut failure is corrected.
 Portable lifecycle acceptance remains open.
-Default Vulkan playback still fails on this AMD host. Targeted renderer engineering
-has resumed; the final section records the r13 handle correction and native
-regressions. The earlier storage pause is historical; recheck current free space
-before recovery operations.
+The r15 engineering renderer plus compatibility-20 environment corrections now
+pass default Vulkan playback through the restarted desktop session (15 seconds,
+100%, exit 0). Complete runtime and guest candidate builds are in progress;
+packaged-artifact acceptance is not yet complete. The final sections record the
+allocation fix, guest locking/unload workarounds, regressions and evidence.
+The earlier storage pause is historical; recheck current free space before
+recovery operations.
 The dated sections below retain prior failures and superseded intermediate states.
 
-Open release gates include the AMD Vulkan playback failure, camera usability,
+Open release gates include packaged AMD Vulkan verification, camera usability,
 portable lifecycle acceptance, physical keyboard/focus and
 monitor checks, and host sleep/network/device checks requiring available hardware
 or Windows permissions. This AMD laptop also cannot supply the separate Intel,
@@ -852,3 +855,34 @@ VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING=1 completes all 15 seconds and exits
 These are diagnostic environment overrides, not yet packaged guest defaults.
 Evidence: r15-default-video.log, r15-symbol-stacks.txt, r15-sync-crash.txt,
 r15-loader-video-result.txt. Packaging and default-session verification remain.
+
+### Default session playback and follow-up build failures
+
+After installing the exact compatibility-20 environment files into the existing
+compatibility-19-r2 disk and restarting the guest, UWSM's systemd user environment
+contains both settings. A systemd-run application with no Vulkan environment or
+renderer overrides plays the 15-second video to 100% and exits 0; one initial
+frame drop is reported. Evidence: r15-session-video-result.txt. This is a manual
+overlay acceptance run, not a boot of the rebuilt guest image. Visual inspection
+later encountered the guest lock screen, so it does not yet prove visible video.
+The Vulkan loader setting is documented at
+https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderInterfaceArchitecture.md.
+
+Complete runtime build 34781229515 is in progress. Guest candidate build
+34781351688 failed safely on repository lock drift: dua-cli 2.44.0-1 to 2.45.0-1,
+gcr-4 4.4.0.1-1 to 4.4.1-1. Patch 0065 updates only those observed package pins;
+rebuild 34781616541 is in progress. Package signatures remain required.
+
+Windows CI additionally reproduced a shortcut ownership bug: the input target
+used C:\Users\RUNNER~1 but IShellLinkW returned C:\Users\runneradmin. Literal
+comparison silently skipped the owned link. Commit 7a15327 compares file identity
+as well as paths, retaining literal matching for absent targets. Focused local
+shortcut tests pass; CI validation is pending. Earlier local repeated testing
+also encountered one transient sharing violation deleting its temporary test
+link; a subsequent 30-run diagnostic sequence passed.
+
+Automatic approval review rejected deletion of the completed rollback's retained
+folder .snapshot-rollback-bfece49d03232a236788356d7c5cbef0 with 'blocked by policy'.
+No cleanup occurred, and no alternate deletion route was attempted. C: still has
+approximately 26 GiB free. Current portable creation's backup/raw-staging space
+requirements exceed this budget, so no further large portable copy was started.
