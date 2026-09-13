@@ -8,30 +8,48 @@ and acceptance evidence. The signed **v0.0.17-preview** is the regression
 baseline; it predates the active snapshot rollback, portable lifecycle,
 multi-display, LAN, USB and saved-session work on that branch.
 
-The latest source-built runtime is recipe r6 from
-[build 34724701163](https://github.com/omacom/try-omarchy-windows/actions/runs/34724701163).
+The latest source-built runtime is recipe r7 from
+[build 34729022320](https://github.com/omacom/try-omarchy-windows/actions/runs/34729022320).
 Its USB and RAM restore smokes passed, and the archives were verified against
 the pinned source recipe. In the nested lab it is extracted to
-`D:\TryOmarchyFullFeaturesTest\runtime-r6`. The runtime archive SHA256 is
-`725588202dbfd6510570775d10df1edcf379641df769cf72a3cfb5e29f3423fc`.
-Keep it separate from signed release payloads. A final integrated signed candidate will be prepared after feature
-implementation and regression checks.
+`D:\TryOmarchyFullFeaturesTest\runtime-r7`. The runtime archive SHA256 is
+`d2a3c972d6837730ecb99f3b470af534f0dba8ca7faf3b2dc36be8adb5fbc3df`.
 
-The correctness review and final 330-test Windows run are recorded in
-[PR-110-REVIEW.md](PR-110-REVIEW.md). The opt-in firewall lifecycle test passed
-separately.
+The complete compatibility-19 guest was built by the Guest image candidate job
+in [run 34731444397](https://github.com/omacom/try-omarchy-windows/actions/runs/34731444397).
+All jobs in that run passed. It includes patch 0063, which fixes outgoing
+file transfers staging archives in the small runtime tmpfs. The image includes
+Omarchy 4.0.3, runtime package 4.0.3-3, streaming transfers and native GTK
+file-transfer windows. The earlier compatibility-19 build passed a Linux KVM
+graphical boot with a visible native transfer window.
 
-The clipboard streaming integration now has a 335-test Windows run with r6,
-including native file clipboard and progress/cancellation checks. Guest patch
-0061 wires the transfer clients into the clipboard bridge; the clean guest
-contract has 99 tests. The final test binary in the nested lab is
-`D:\TryOmarchyFullFeaturesTest\streaming-clipboard.test.exe`, SHA256
-`51904380e51a1c1ef8f4f629e872373e5c4a62cf2ffb296bf22acfc03a0b0cb1`.
-Its log is `D:\TryOmarchyFullFeaturesTest\streaming-suite.txt`.
+The verified guest lives at `D:\TryOmarchyFullFeaturesTest\guest19-r2` in Windows
+and `/data/try-omarchy-feature-guest-artifacts/compat19-r2` on Linux (compressed
+image and metadata; the raw image was stream-verified). Rootfs SHA256:
+`dafc29fe70e74fd6621290c0172a4d0a3b16ad237cb747a14cfa83a31fdca82a`.
+Keep these unsigned feature artifacts separate from signed release payloads.
 
-Guest source now includes the streaming helper at compatibility revision 19.
+Review and test evidence is in [PR-110-REVIEW.md](PR-110-REVIEW.md).
+The final r7 suite passed 344 Windows tests including the capability-negotiation
+fix. Native OLE dragging from the Windows transfer window into actual SDL QEMU
+also passed five repeated runs. The final compatibility-19 guest passed the
+Windows TCG graphical boot and a 31 MiB file-drop round trip in both directions.
+Both native transfer windows appeared; file bytes, originals and clipboards
+were preserved. The fixture passed in 154.39 seconds.
+
+The round-trip test executable is `D:\TryOmarchyFullFeaturesTest\drop-session.test.exe`,
+SHA256 `818de0b9d8db5390bb66d48ab801ccca876d297b66c19be67b51341f2d7f59a7`.
+Its log is `D:\TryOmarchyFullFeaturesTest\guest-transfer.txt`. The earlier
+344-test executable is retained as `drop-session-full-tested.exe`, with its
+hash and log recorded in the review. Reproduction instructions are in
+[`scripts/vmtest/README.md`](../scripts/vmtest/README.md).
+
+Use the `guest19-r2` image for the next round. The earlier `guest19` image
+predates the disk-cache fix. The expanded `transfer-test.qcow2` is a disposable
+smoke-test overlay, separate from the installation and signed baseline.
+
 When rerunning smoke checks against the signed v17 baseline, pass
-`--compat-revision 18` explicitly.
+`--compat-revision 18` explicitly. The compatibility-19 guest uses the default.
 
 Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for the signed baseline
 artifacts and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for its test matrix.

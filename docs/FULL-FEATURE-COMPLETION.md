@@ -400,3 +400,59 @@ retains its separate opt-in. Test executable SHA256:
 `51904380e51a1c1ef8f4f629e872373e5c4a62cf2ffb296bf22acfc03a0b0cb1`.
 AMD64 test compilation, Windows vet and the ARM64 launcher build passed. The
 new helpers still need the combined guest-image and physical acceptance round.
+
+### Native file-drop integration
+
+The launcher accepts file drops in its File transfers window and receives
+bounded `DISPLAY_FILE_DROP` events from the SDL runtime. Dropped files use the
+same verified streaming service as clipboard copies, with separate control
+frames so dropping files does not replace the clipboard. The guest has a
+native GTK transfer window that accepts file and folder drops and exposes
+received files as Wayland drag sources. The Windows window exposes received
+files through the Shell's native OLE data object for dragging into Explorer.
+These transfer windows mediate the cross-desktop operation; direct placement
+into an arbitrary application under the pointer remains a separate interaction
+to complete. The runtime event currently identifies the display, not coordinates.
+
+Guest patch 0062 packages the window, desktop entry and explicit GTK/Python
+requirements for fresh and existing installations. The clean patch stack runs
+101 tests, with the native GTK test opt-in; that test passes separately on the
+local Wayland desktop. A complete compatibility-19 guest was built in
+[CI run 34729345668](https://github.com/omacom/try-omarchy-windows/actions/runs/34729345668).
+Its image job passed first-boot checks, including the installed transfer helper
+and GTK dependencies. The same downloaded image passed a local graphical boot
+with one display and a visible transfer window under Hyprland. This is an
+unsigned test image and has not replaced the signed v17 baseline.
+
+### Saved-session failure recovery
+
+The coordinator now checks migration capability and existing disk jobs before
+pausing a running guest. A complete disk/RAM pair leaves the source stopped for
+launcher shutdown. On failure, recovery opens a fresh QMP connection, cancels
+its outstanding migration, settles its own disk-copy jobs and verifies that
+the original guest is running again. An unrelated job or uncertain runtime
+state preserves the paused guest and reports the recovery problem.
+
+Real QEMU tests cover failed disk selection, cancellation during copying,
+connection loss during copying and a successful save. A controlled QMP peer
+also applies stop but drops its reply, proving that recovery reconnects and
+resumes without replaying stop. These extend the storage engine. Production
+launcher save/resume controls and WHPX/virgl state preservation still need
+implementation; the current runtime's migration blockers remain intact.
+
+The full Windows guest round trip found that guest outgoing archives used the
+small `/run/user` tmpfs. Patch 0063 stages them in the disk-backed XDG cache,
+keeping runtime locks and clipboard markers separate from archive data. The
+regression tests both drop and clipboard paths with insufficient runtime space,
+connection failure cleanup and intact originals. The clean guest contract runs
+102 tests, with one native GTK opt-in skipped.
+
+
+The corrected image from build 34731444397 now passes the real Windows TCG
+file-transfer round trip: 31 MiB Unicode files in each direction, both native
+windows visible, unchanged clipboards and intact originals. The final r7
+interactive suite passes 344 tests. The exact images, test executables and logs
+are recorded in [PR-110-REVIEW.md](PR-110-REVIEW.md) and the Windows handoff.
+This closes the mediated transfer-window integration and saved-session failure
+recovery work described above. Direct application drop placement and production
+accelerated saved sessions retain their separate implementation requirements.
