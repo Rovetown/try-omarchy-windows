@@ -12,16 +12,17 @@ creation and restore-as-copy now pass, including whole-disk hash verification
 and a real desktop boot. Active rollback also passes disk, retained-state and
 guest-persistence checks; its Unicode recovery-shortcut failure is corrected.
 Portable lifecycle acceptance remains open.
-The r15 engineering renderer plus compatibility-20 environment corrections now
-pass default Vulkan playback through the restarted desktop session (15 seconds,
-100%, exit 0). Complete runtime and guest candidate builds are in progress;
-packaged-artifact acceptance is not yet complete. The final sections record the
-allocation fix, guest locking/unload workarounds, regressions and evidence.
+The complete r15 runtime plus the rebuilt compatibility-20 guest now pass
+integrated default Vulkan playback (15 seconds, 100%, exit 0), visible moving
+video, persistent-file integrity and clean shutdown. The packaged compatibility
+update delivered the settings after the manual copies were removed. Both build
+pipelines and current launcher CI pass. The final sections record exact artifacts,
+the allocation fix, guest locking/unload workarounds, regressions and evidence.
 The earlier storage pause is historical; recheck current free space before
 recovery operations.
 The dated sections below retain prior failures and superseded intermediate states.
 
-Open release gates include packaged AMD Vulkan verification, camera usability,
+Open release gates include camera usability,
 portable lifecycle acceptance, physical keyboard/focus and
 monitor checks, and host sleep/network/device checks requiring available hardware
 or Windows permissions. This AMD laptop also cannot supply the separate Intel,
@@ -886,3 +887,60 @@ folder .snapshot-rollback-bfece49d03232a236788356d7c5cbef0 with 'blocked by poli
 No cleanup occurred, and no alternate deletion route was attempted. C: still has
 approximately 26 GiB free. Current portable creation's backup/raw-staging space
 requirements exceed this budget, so no further large portable copy was started.
+
+### Integrated r15 / compatibility-20 acceptance, 16:03 CDT
+
+PASS: complete runtime build 34781229515, recipe winq-emu-alpha10-source-r15.
+Runtime ZIP SHA256: `8b0e198356dd4362478f91f6cebf0e71e7b59558829233f6ebd9b35e9b4debdc`.
+Source ZIP SHA256: `2fa9fa8d57cccbd703523935a9fd44a5b4d6ed82f8259b7302d2303a55a65dd6`.
+Downloaded archives passed runtime-build/verify.py and the actual DLL handle test.
+Installed renderer DLL: `02e0d58a2827740e499ba4585f4c1900d21cabb0a713161c102578a18c31500d`.
+
+PASS: all four jobs in CI run 34781901160, including complete guest build/boot,
+compatibility 20 and Vulkan environment smoke. Factory rootfs SHA256:
+`64f37e2a4b5f8ce88ba117177e7d7a1a24a98326c5fc4e5fc2210895f5463ca2`.
+Compressed rootfs: `e5495ccd5ec1fc8fc9631cb94c22441dc427a9138277a37356a96370bb9366bc`.
+Initramfs: `bb60e76cb40d65411dd98b5a50eab3c07d90e3eb62c6943d3d96e60de1b4843c`.
+The preceding guest run's only smoke mismatch was its obsolete expected revision
+19. The new smoke expects 20 and explicitly checks the Vulkan environment.
+Local smoke helper unit tests pass; four unrelated shell-dependent release helper
+tests could not run from native Python because bash was absent from its PATH.
+The complete release helper suite passes in Linux CI.
+
+The unsigned local launcher uses current application source from 7a15327 with
+only its embedded candidate manifest and release variables changed. SHA256:
+`9839bc43b483722c109eb8271b68410ee75a1543da592e3db7f176325b8a77de`.
+Combined manifest: `9fb255dff78263bf4140063ff553cc00c3c9e8f8c5c66e63c284b31131a9a92e`.
+It is served only at http://127.0.0.1:18080/v0.0.18-preview. No release was published.
+
+The first update attempt mistakenly allowed discovery of the pre-existing
+C:\WINQ-EMU runtime, which fails on the Unicode installation path. This was a
+test configuration failure, not a failure of r15. The launcher recovered the
+previous guest files; the persistence fixture still matched. After a clean
+recovery boot, the three manually installed Vulkan environment files were removed.
+The next launch explicitly excluded external runtime discovery and updated the
+bundled runtime and guest using the authenticated candidate manifest.
+
+PASS on the existing persistent installation:
+- Boot reports compatibility `20:7.2.4-arch1-2` and guest-ready at 16:02:11.
+- Packaged update recreates the removed environment files; UWSM inherits both
+  settings. The common script hash is
+  `537f3e7908b25564936d366485af8beabcf03526a7baf44a7eb447aa62235e43`.
+- Both persistent test files retain their recorded hashes.
+- Default systemd-launched mpv uses Vulkan, plays all 15 seconds and exits 0.
+- Native Windows screenshot confirms visible moving test video at frame 218.
+- Guest/runtime receipts identify the new manifest and runtime ZIP; no pending
+  payload-update state remains after userspace readiness.
+- Guest powers off cleanly at 16:03:30; no QEMU process remains.
+
+Evidence under the acceptance root: r15-guest20-candidate.json,
+guest20-verified-downloads.json, r15-full-native-handles.json,
+r15-integrated-result.txt, r15-integrated-video.log, r15-integrated-video.png,
+r15-update-recovery.txt and r15-integrated-shell.log. The final evidence hash
+inventory is r15-integrated-evidence-hashes.json.
+
+C: has 24,400,986,112 free bytes (22.72 GiB) after the integrated update.
+No additional VM disk was created. The AMD playback blocker is closed on this
+hardware with these exact artifacts; camera, portable lifecycle, the outstanding
+full-feature implementations and hardware-specific gates remain unproven/open.
+This is not an all-features release approval.

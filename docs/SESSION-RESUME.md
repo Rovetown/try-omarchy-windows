@@ -5,6 +5,20 @@ Physical Windows continuation on September 13, 2026 is recorded in
 Read that report first for laptop paths, current fixes, test evidence and the
 remaining live Windows acceptance work. The sections below retain the prior lab handoff.
 
+Latest laptop checkpoint: full runtime r15 build `34781229515` and guest
+compatibility-20 build `34781901160` pass integrated AMD Vulkan playback and
+update delivery. Launcher short/long-path shortcut ownership is fixed in
+`7a15327`; current CI passes. The guest is cleanly stopped. Use
+`C:\cssi\try-omarchy-acceptance\2026-09-13\TryOmarchy-r15-guest20-candidate.exe`
+with the existing `Move 世界\TryOmarchy` installation and explicitly bypass the
+old `C:\WINQ-EMU` discovery path (`-winq` can name the nonexistent acceptance
+`bundled-only` path to select the verified bundled runtime). The local manifest
+is under `http://127.0.0.1:18080/v0.0.18-preview`; this is not a published release.
+Portable lifecycle still lacks sufficient free space under its current staging
+requirements. Automatic review denied removal of the completed retained rollback
+copy; do not retry that deletion through another route. Read the report's final
+checkpoint before creating more disks. No host reboot or public pin change occurred.
+
 Updated September 12, 2026, after the native file-transfer and recovery round.
 
 ## Checkout and current state

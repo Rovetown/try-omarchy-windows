@@ -9,8 +9,12 @@ produced r10/r11/r12 corrections; r12 three-output power cycling and secondary
 rendering pass physical checks, including a 61-sample, 3,613-second endurance run,
 three-output CPU rendering, graceful close confirmation and induced GPU-to-CPU
 fallback. Physical keyboard/focus acceptance remains open. Default mpv Vulkan
-playback also fails on this AMD configuration, although explicit OpenGL plays.
-These findings keep the public pin unchanged.
+playback failed through r13. The complete r15 runtime and compatibility-20 guest
+now pass default Vulkan playback, visible output, persistence and shutdown on
+this AMD laptop. They include host-imported memory backing plus guest-side
+presentation and driver-lifetime workarounds. Other hardware and feature gates
+remain open, so the public pin remains unchanged. See the laptop report for the
+exact artifact hashes and the distinction between engineering and final builds.
 
 The published runtime already uses our source-built `winq-emu-alpha10-source-r3`
 archives. On September 12, both public v0.0.9-preview archives were downloaded
