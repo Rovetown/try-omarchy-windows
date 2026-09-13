@@ -74,7 +74,7 @@
       },
       {
         "file": "patches/virglrenderer/0002-import-windows-host-memory-for-internal-resources.patch",
-        "sha256": "13de141871b0fd7e3dd83cb86bd65cc4db1313072e17fc056d7035495e3e2042"
+        "sha256": "403f60a2a00cf65b860e5bec8b98483e00056949d945bb4174a46b6416f5cc53"
       }
     ]
   }
