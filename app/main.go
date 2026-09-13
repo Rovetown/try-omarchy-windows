@@ -804,6 +804,9 @@ func supervise(cfg *config, cmdline string) bool {
 				return false
 			case <-exited:
 				startupDead = true
+				if detail := qemuStartupFailureTail(cfg.vmDir); detail != "" {
+					logf("QEMU startup failure (attempt %d, %s):\n%s", attempt, mode, detail)
+				}
 				if forwardStartupProblem(cfg.vmDir) {
 					fatal("A configured port could not be opened. Another application may be using it, or the network adapter changed. Update the forward in Settings and try again.")
 				}

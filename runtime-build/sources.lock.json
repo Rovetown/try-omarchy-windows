@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r9",
+  "name": "winq-emu-alpha10-source-r10",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -45,6 +45,10 @@
       {
         "file": "patches/qemu/0009-use-utf8-for-windows-runtime-paths.patch",
         "sha256": "635c48e6d10ddc80ac3a068f275b877c51e062d188986fdd86ebb775a0a74670"
+      },
+      {
+        "file": "patches/qemu/0010-reset-sdl-scanout-before-destroying-secondary-window.patch",
+        "sha256": "2e74e6c99704e1c1894e3702f2756dfed0609fcb8a9c8b9628bfde0ca53a15a6"
       }
     ]
   },

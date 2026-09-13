@@ -3,11 +3,33 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// Keep the original failure in shell.log before a fallback truncates stderr.
+// Limit the tail so a noisy failed runtime cannot flood the launcher log.
+func qemuStartupFailureTail(vmDir string) string {
+	f, err := os.Open(filepath.Join(vmDir, "qemu-stderr.log"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	const limit = 16 * 1024
+	start := max(int64(0), info.Size()-limit)
+	data, err := io.ReadAll(io.NewSectionReader(f, start, limit))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
 
 // buildQemuArgs selects the native runtime devices and private controls.
 // Rendering follows scripts/launch-omarchy.ps1: GPU mode is WINQ-EMU's stack (patched WHPX survives -cpu host;

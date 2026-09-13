@@ -16,10 +16,10 @@ func guestDisplayCount(count int) int {
 	return count
 }
 
-func displayDevice(cfg *config, hostmem string) string {
+func displayDevice(cfg *config, hostmem uint64) string {
 	if guestDisplayCount(cfg.displays) == 1 {
 		if cfg.useGpu {
-			return "virtio-vga-gl,blob=on,hostmem=" + hostmem + ",venus=on"
+			return "virtio-vga-gl,blob=on,hostmem=" + strconv.FormatUint(hostmem, 10) + ",venus=on"
 		}
 		return "virtio-gpu-pci,id=gpu0"
 	}

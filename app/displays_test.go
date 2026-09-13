@@ -16,13 +16,17 @@ func TestMultipleDisplayDeviceIncludesEnabledOutputs(t *testing.T) {
 				Width  int    `json:"xres"`
 				Height int    `json:"yres"`
 			} `json:"outputs"`
-			Count int `json:"max_outputs"`
+			Count   int    `json:"max_outputs"`
+			HostMem uint64 `json:"hostmem"`
 		}
-		if err := json.Unmarshal([]byte(displayDevice(cfg, "512M")), &device); err != nil {
+		if err := json.Unmarshal([]byte(displayDevice(cfg, 512<<20)), &device); err != nil {
 			t.Fatal(err)
 		}
 		if device.Count != 3 || len(device.Outputs) != 3 {
 			t.Fatal("missing outputs")
+		}
+		if gpu && device.HostMem != 512<<20 {
+			t.Fatal("GPU JSON hostmem must be an integer byte count")
 		}
 		for i, output := range device.Outputs {
 			if output.Width != 1440 || output.Height != 900 || output.Name == "" {

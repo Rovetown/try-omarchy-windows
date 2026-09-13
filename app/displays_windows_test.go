@@ -21,7 +21,7 @@ func TestNativeQEMUPrimaryWindow(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	cfg := &config{displays: 3, displayWidth: 800, displayHeight: 600}
-	cmd := exec.Command(tool, "-machine", "q35", "-accel", "tcg", "-m", "128", "-nodefaults", "-S", "-device", displayDevice(cfg, "256M"), "-display", "sdl,gl=off,window-close=off", "-name", appTitle)
+	cmd := exec.Command(tool, "-machine", "q35", "-accel", "tcg", "-m", "128", "-nodefaults", "-S", "-device", displayDevice(cfg, 256<<20), "-display", "sdl,gl=off,window-close=off", "-name", appTitle)
 	var detail diskToolErrors
 	cmd.Stderr = &detail
 	if err := cmd.Start(); err != nil {

@@ -1,5 +1,10 @@
 # Windows session handoff
 
+For the September 13 physical laptop continuation, read
+[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md)
+for current paths, runtime r8/r9 corrections, evidence and unresolved acceptance
+failures. The earlier lab paths and results below are historical.
+
 Updated September 12, 2026. Start here before further release testing.
 
 For the exact checkout, next engineering steps and release assessment, read

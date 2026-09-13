@@ -1,5 +1,13 @@
 # Source-built runtime validation
 
+September 13 physical laptop results are recorded in
+[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md).
+That round found r7 shared-folder Unicode/timestamp failures and Unicode
+installation-path failures. The r8 sharing correction passes on the laptop;
+r9 path correction is undergoing integrated acceptance. Default mpv Vulkan
+playback also fails on this AMD configuration, although explicit OpenGL plays.
+These findings keep the public pin unchanged.
+
 The published runtime already uses our source-built `winq-emu-alpha10-source-r3`
 archives. On September 12, both public v0.0.9-preview archives were downloaded
 and verified against `guest-build/runtime.lock.json`; the bundled source lock

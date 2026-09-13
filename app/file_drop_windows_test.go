@@ -142,7 +142,7 @@ func TestNativeQEMUFileDropEvent(t *testing.T) {
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	cmd := exec.Command(tool, "-machine", "q35,accel=tcg", "-m", "64", "-S", "-nodefaults", "-device", displayDevice(&config{displays: 1, displayWidth: 800, displayHeight: 600}, "256M"), "-display", "sdl,gl=off", "-name", appTitle, "-qmp", "tcp:"+address+",server=on,wait=off")
+	cmd := exec.Command(tool, "-machine", "q35,accel=tcg", "-m", "64", "-S", "-nodefaults", "-device", displayDevice(&config{displays: 1, displayWidth: 800, displayHeight: 600}, 256<<20), "-display", "sdl,gl=off", "-name", appTitle, "-qmp", "tcp:"+address+",server=on,wait=off")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
