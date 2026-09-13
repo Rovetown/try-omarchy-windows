@@ -105,6 +105,7 @@ apply_locked_patches virglrenderer "$virgl_source"
 python "$recipe/test-usb-port.py" "$qemu_source/hw/usb/host-libusb.c"
 python "$recipe/test-socket-close.py" "$qemu_source/util/oslib-win32.c"
 python "$recipe/test-file-drop.py" "$qemu_source/ui/sdl2.c"
+python "$qemu_source/scripts/qapi-gen.py" -o "$work/qapi-validation" -b "$qemu_source/qapi/qapi-schema.json"
 
 virgl_build="$work/virgl-build"
 meson setup "$virgl_build" "$virgl_source" \

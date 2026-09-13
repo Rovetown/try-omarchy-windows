@@ -10,7 +10,7 @@ index f71c50a..e65905a 100644
 +##
 +# @DISPLAY_FILE_DROP:
 +#
-+# Files dropped by the host user on an SDL display window. The
++# Files dropped by the host user on an SDL display window.  The
 +# launcher transfers contents; this event only reports paths.
 +#
 +# @display: QEMU console index receiving the drop.

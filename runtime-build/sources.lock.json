@@ -36,7 +36,7 @@
       },
       {
         "file": "patches/qemu/0007-report-native-file-drops.patch",
-        "sha256": "26a3293c9e151422e81acea95257146cc52e55003c916adb8aac5ff77145a392"
+        "sha256": "7711bd1ac183d09ed2c6f75c8b0e688a314881efa4a94ad379acd4b851e8c0ab"
       }
     ]
   },
