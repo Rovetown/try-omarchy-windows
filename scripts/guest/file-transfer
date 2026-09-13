@@ -305,10 +305,15 @@ def clipboard_selection_key(paths):
     return digest.hexdigest()
 
 
-def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
+def transfer_cache():
     cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'try-omarchy-transfers'
     plain_path(cache)
     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return cache
+
+
+def clipboard_receive(ticket, state, host='10.0.2.2', port=4452):
+    cache = transfer_cache()
     destination = cache / ('received-' + os.urandom(16).hex())
     result = download(ticket, destination, host, port)
     paths = [Path(path) for path in result['paths']]
@@ -331,7 +336,10 @@ def clipboard_send(data, state, host='10.0.2.2', port=4452, push_port=4448, purp
     marker = state / 'last_file_selection'
     if purpose == 'clipboard' and marker.exists() and marker.read_text() == key:
         return {'state': 'unchanged'}
-    with tempfile.TemporaryDirectory(prefix='transfer-', dir=state) as temporary:
+    # Runtime state is usually a small tmpfs. Keep archive data on the same
+    # disk cache as received files, preserving the runtime directory for locks
+    # and small clipboard markers only.
+    with tempfile.TemporaryDirectory(prefix='transfer-', dir=transfer_cache()) as temporary:
         archive = Path(temporary) / 'selection.zip'
         offer = pack(paths, archive)
         with socket.create_connection((host, push_port), timeout=10) as control:
