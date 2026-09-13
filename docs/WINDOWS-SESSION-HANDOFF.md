@@ -2,6 +2,9 @@
 
 Updated September 12, 2026. Start here before further release testing.
 
+For the exact checkout, next engineering steps and release assessment, read
+[SESSION-RESUME.md](SESSION-RESUME.md).
+
 The full-feature work is on `codex/full-feature-completion`. Read
 [FULL-FEATURE-COMPLETION.md](FULL-FEATURE-COMPLETION.md) first for implementation
 and acceptance evidence. The signed **v0.0.17-preview** is the regression

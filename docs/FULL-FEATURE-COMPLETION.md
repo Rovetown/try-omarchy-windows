@@ -1,5 +1,9 @@
 # Full feature completion
 
+Current continuation order and release assessment: [SESSION-RESUME.md](SESSION-RESUME.md).
+The sections below preserve the implementation history; later evidence supersedes
+earlier statements about work still to do.
+
 This is the active completion scope requested on September 12, 2026. All eight
 features belong to the finished product. Earlier v1 exclusions are superseded
 by this plan. The signed v17 candidate remains the regression baseline.
