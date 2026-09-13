@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // Run in its own interactive test process alongside smoke-guest.py's transfer
@@ -57,6 +59,22 @@ func TestGuestDesktopFileTransferRoundTrip(t *testing.T) {
 		data, err := os.ReadFile(paths[0])
 		if err != nil || !bytes.Equal(data, payload) {
 			t.Fatal("guest return data changed", err)
+		}
+		class, _ := syscall.UTF16PtrFromString("TryOmarchyFileDrops")
+		visibleDeadline := time.Now().Add(5 * time.Second)
+		for {
+			window, _, _ := user32.NewProc("FindWindowW").Call(uintptr(unsafe.Pointer(class)), 0)
+			list, _, _ := user32.NewProc("GetDlgItem").Call(window, 4600)
+			count, _, _ := procSendMessageW.Call(list, 0x18b, 0, 0)
+			visible, _, _ := procIsWindowVisible.Call(window)
+			if window != 0 && visible != 0 && count == 1 {
+				procPostMessageW.Call(window, wmClose, 0, 0)
+				break
+			}
+			if time.Now().After(visibleDeadline) {
+				t.Fatal("received file did not appear in the native Windows window")
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
 		// Wait for the control handler to write its completion acknowledgment.
 		bridge.mu.Lock()
