@@ -8,8 +8,10 @@ outside this run's scope.
 Latest checkpoint: storage recovery and retained-source cleanup pass; runtime
 r12 passed three-output GPU/CPU DPMS checks and its one-hour endurance run.
 Shutdown confirmation and forced GPU-to-CPU fallback also pass. Full snapshot
-and portable lifecycle acceptance is continuing. Default Vulkan playback still
-fails on this AMD host.
+creation and restore-as-copy now pass, including whole-disk hash verification
+and a real desktop boot. Rollback and portable lifecycle acceptance remain open.
+Default Vulkan playback still fails on this AMD host. Testing is paused at the
+storage gate described in the final section; no guest is running.
 The dated sections below retain prior failures and superseded intermediate states.
 
 Open release gates include the AMD Vulkan playback failure, camera usability,
@@ -75,6 +77,8 @@ Hyper-V role is disabled. Detailed facts are in `host-inventory.json`.
 | Host sleep/resume | Pending | Host has not slept or rebooted during this acceptance run |
 | Multiple displays | r12 three-output GPU DPMS passes; secondary native rendering observed; full visual/input acceptance ongoing | r10 teardown, r11 stale-input and r12 GL-context sharing fixes; r12-gpu-dpms-cycles.txt |
 | Installation move | Pass cancellation, disk-full recovery, redirect boot and retained-source cleanup | move-cleanup-result.json; moved-guest-persistence.txt |
+| Full snapshot create/list/restore-as-copy | Pass native UI, Unicode name, 24 GiB whole-disk hash, desktop boot and persistence | r12-snapshot-created.json; r12-snapshot-restored-disk.json; r12-snapshot-restored-boot.txt; r12-snapshot-restored-desktop.jpg |
+| Full snapshot rollback and portable lifecycle | Open, storage gate | Disposable restore retained after cleanup approval rejection; see final section |
 | Launcher TCP/UDP forwards | Pass localhost round trips | `r9-launcher-forwards.json`; LAN/firewall remains separate |
 | Settings repair and diagnostics | Pass real installation | Decline preserves malformed bytes; repair retains backup; diagnostics redact path and omit disks/private key |
 
@@ -639,3 +643,39 @@ the isolated launcher SHA256 is
 Public release defaults remain unchanged. Evidence: combined-r12-moved-runtime.json
 and combined-r12-moved-persistence.txt. Full snapshot creation with the Unicode
 name `r12 baseline 世界` is now running through the native UI.
+
+### Full snapshot creation and independent boot passed; storage gate
+
+The native snapshot UI created and listed `r12 baseline 世界`, ID
+`184b4dabfb0abc1c2fbbecb75d30bb61`. The archive is 6,510,965,002 bytes with
+SHA256 `a8aada049e0590441473b90165872ca2ad61c487d81ae576baed95ba154dde88`.
+Restore as copy completed through the native folder picker into
+`C:\cssi\try-omarchy-acceptance\2026-09-13\OmarchySnapshot-20260913-140302`.
+An independent SHA256 of the restored 24 GiB disk matched the archive manifest:
+`f00885b1c334c2ced5087d6a735359b5b6558683c40cd84b68046bb4bafb953f`.
+The restored guest reached a visible desktop, systemd reported `running`, both
+persistent fixture hashes matched, and QMP poweroff completed cleanly. Logs are
+retained separately under `r12-snapshot-copy-history`. Evidence includes
+`r12-snapshot-restore-success.jpg`, `r12-snapshot-restored-disk.json`,
+`r12-snapshot-restored-boot.txt` and `r12-snapshot-restored-desktop.jpg`.
+
+Automatic approval review rejected the scoped deletion of this new disposable
+restore with only `blocked by policy`. No deletion ran and it was not retried
+through another mechanism. The copy remains intact and stopped, as do the moved
+source and completed snapshot. C: subsequently reported 9,871,478,784 free bytes.
+The restored copy occupies approximately 13.22 GB of allocated storage. Another
+full restore for rollback or portable staging would exceed the observed budget;
+these operations were not started. This is a cleanup/space gate, not a failed
+rollback or portable result. No host reboot, release publication or public pin
+change occurred.
+
+To continue, reclaim the disposable copy above (and, if needed, the obsolete
+test-only `fresh` copy already identified in earlier cleanup requests), then
+verify actual free space again. Keep `Move 世界\TryOmarchy`, its completed
+checkpoint, and the original `%LOCALAPPDATA%\TryOmarchy` installation. Next:
+write a post-snapshot marker in the moved guest, stop it, exercise active rollback,
+verify the marker disappears and the previous disk is retained, then run portable
+creation, boot, changed drive letter, update and recovery. Physical USB removal,
+another PC and the other graphics/architecture configurations remain distinct
+hardware gates. The known Vulkan and camera failures and unfinished full-feature
+implementation requirements still prevent release approval.
