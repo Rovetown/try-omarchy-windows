@@ -679,3 +679,44 @@ creation, boot, changed drive letter, update and recovery. Physical USB removal,
 another PC and the other graphics/architecture configurations remain distinct
 hardware gates. The known Vulkan and camera failures and unfinished full-feature
 implementation requirements still prevent release approval.
+
+### Targeted renderer engineering after the acceptance stop
+
+The next work targets the Vulkan memory-sharing failure, without creating more
+guest copies. Native capability probes show that OPAQUE_WIN32 and HOST_ALLOCATION
+have disjoint compatible-handle masks (`0x2` and `0x80`); combining them is invalid.
+Host-importable RGBA8 linear and optimal images and transfer buffers report
+host-visible types 1 and 3 (`0xa`), while Win32-exportable equivalents report
+only device-local type 0 (`0x1`). A 64 KiB pagefile-backed Windows shared section
+was imported into Vulkan and filled by the GPU. Both independently mapped views
+contained the correct bytes after closing the original section handle. These
+are native backend building blocks, not a guest playback pass. Evidence:
+venus-handle-compatibility.json, venus-image-compatibility.json and
+venus-shared-section-import.json.
+
+The renderer handle audit found a separate concrete prerequisite bug:
+`os_get_win32_handle_from_fd` called UCRT with a synthetic token before consulting
+the token table; `mmap` also treated a failed CRT descriptor as a raw HANDLE.
+Runtime r12's actual DLL fails the new native regression: both wrapped section
+mappings fail and seven CRT invalid-parameter callbacks occur. The test catches
+these callbacks only in its own thread and restores the previous handler.
+`venus-native-handles-before.json` records the result. This is distinct from the
+AMD memory-type incompatibility.
+
+Commit 18d5ae6 adds the r13 handle correction: resolve wrapped handles first,
+reject stale tokens without CRT calls, close duplicate handles when token
+publication fails, and make mapping use the same resolver. A compiled regression
+executes the actual extracted C functions. The unpatched source aborts the test
+on its first synthetic-token CRT call; the corrected source passes lookup,
+mapping ownership, stale-token and failure-cleanup checks. It ran using the
+existing guest's compiler, with no new guest image or desktop acceptance loop.
+Evidence: venus-handle-regression-before.txt and venus-handle-regression.txt.
+The r13 source-built candidate is in Runtime run 34777622186. Native candidate
+validation is pending; public release pins remain unchanged.
+
+The full allocation fix still needs buffer/image creation and requirements to
+use compatible backing, shared-memory allocation and blob import/export, and
+correct mapping lifetime through memory, device and context destruction. The
+existing Vulkan 1.3 device-buffer requirements dispatch also needs to apply the
+same creation-info transformation as actual buffer creation. Camera capture and
+the other previously listed feature/acceptance gates remain open.

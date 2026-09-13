@@ -22,9 +22,27 @@ try:
    item['skip']='No VK_KHR_external_memory_win32';results.append(item);continue
   queues=v.vkGetPhysicalDeviceQueueFamilyProperties(pd)
   qi=next(i for i,q in enumerate(queues) if q.queueFlags & v.VK_QUEUE_GRAPHICS_BIT)
-  dev=v.vkCreateDevice(pd,v.VkDeviceCreateInfo(pQueueCreateInfos=[v.VkDeviceQueueCreateInfo(queueFamilyIndex=qi,queueCount=1,pQueuePriorities=[1.0])],ppEnabledExtensionNames=['VK_KHR_external_memory_win32']),None)
+  enabled=['VK_KHR_external_memory_win32']
+  handles=[('opaque_win32',v.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT)]
+  if 'VK_EXT_external_memory_host' in exts:
+   enabled.append('VK_EXT_external_memory_host')
+   handles.append(('host_allocation',v.VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT))
+  item['externalBufferProperties']=[]
+  compatible={}
+  for label,handle in handles:
+   external=v.vkGetPhysicalDeviceExternalBufferProperties(pd,v.VkPhysicalDeviceExternalBufferInfo(usage=v.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,handleType=handle)).externalMemoryProperties
+   compatible[handle]=int(external.compatibleHandleTypes)
+   item['externalBufferProperties'].append({'kind':label,'features':hex(external.externalMemoryFeatures),'compatibleHandleTypes':hex(external.compatibleHandleTypes)})
+  if len(handles)==2:
+   combined=handles[0][1] | handles[1][1]
+   # Vulkan requires every requested type to allow the complete combination.
+   if all(compatible[handle] & combined == combined for _,handle in handles):
+    handles.append(('win32_and_host_allocation',combined))
+   else:
+    item['combinedHandlesUnsupported']=True
+  dev=v.vkCreateDevice(pd,v.VkDeviceCreateInfo(pQueueCreateInfos=[v.VkDeviceQueueCreateInfo(queueFamilyIndex=qi,queueCount=1,pQueuePriorities=[1.0])],ppEnabledExtensionNames=enabled),None)
   try:
-   for label,handle in [('ordinary',0),('opaque_win32',v.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT)]:
+   for label,handle in [('ordinary',0)]+handles:
     ext=v.VkExternalMemoryBufferCreateInfo(handleTypes=handle) if handle else None
     buf=v.vkCreateBuffer(dev,v.VkBufferCreateInfo(pNext=ext,size=65536,usage=v.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,sharingMode=v.VK_SHARING_MODE_EXCLUSIVE),None)
     req=v.vkGetBufferMemoryRequirements(dev,buf)

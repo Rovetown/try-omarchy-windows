@@ -65,6 +65,7 @@ jobs:
           python runtime-build/smoke-usb.py runtime-output/smoke/qemu-system-x86_64.exe
           python runtime-build/smoke-memory.py runtime-output/smoke/qemu-system-x86_64.exe
           python runtime-build/smoke-unicode-paths.py runtime-output/smoke
+          python runtime-build/test-win32-handles-native.py runtime-output/smoke/libvirglrenderer-1.dll
 
       - name: Verify archives
         shell: pwsh

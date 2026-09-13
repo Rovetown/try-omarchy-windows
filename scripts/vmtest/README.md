@@ -128,6 +128,7 @@ be supplied instead of installing into the Python environment:
 python -m pip install --target C:\acceptance-deps vulkan==1.3.275.1
 python scripts\vmtest\windows-vulkan-memory.py --vulkan-python-path C:\acceptance-deps
 python scripts\vmtest\windows-vulkan-host-import.py --vulkan-python-path C:\acceptance-deps
+python scripts\vmtest\windows-vulkan-images.py --vulkan-python-path C:\acceptance-deps
 ```
 
 The first prints the buffer memory-type masks with ordinary and OPAQUE_WIN32
@@ -137,9 +138,27 @@ The current runtime forces external buffers, explaining the observed guest
 staging-buffer allocation failure. This diagnostic reports capabilities; an exit
 code of zero alone is not a guest Vulkan pass.
 
-The second imports aligned host memory, binds it to a Vulkan buffer, fills it
-on the GPU, synchronizes host access, and checks all 64 KiB on CPU read. It passed
+The first also queries host-allocation handles and verifies whether the driver
+permits combining them with Win32 export handles before testing that combination.
+The AMD driver reports disjoint compatible-handle masks (`0x80` and `0x2`), so
+combining them is not a valid fix.
+
+The second imports a pagefile-backed Windows shared section, binds it to a Vulkan
+buffer, fills it on the GPU, synchronizes host access, and checks all 64 KiB through
+two independent views after the original section handle is closed. It passed
 on that laptop, identifying a possible implementation direction. It does not
 implement or validate a Venus/QEMU sharing path. Devices lacking the extension
 are explicitly reported as skipped, not passed. Keep the JSON output with the
 host driver identity and integrated guest playback results.
+
+The third queries RGBA8 linear/optimal image support and memory-type masks for
+ordinary, Win32-exportable and host-importable images. It does not allocate image
+memory or prove guest playback. On the AMD laptop, host-importable images support
+host-visible types 1 and 3; Win32-exportable images support only type 0.
+
+`runtime-build/test-win32-handles-native.py <runtime-bin>\libvirglrenderer-1.dll`
+tests the actual renderer DLL's handle lookup, duplication, mapping and ownership
+using a 64 KiB section. Its temporary, thread-local CRT handler records invalid
+parameter calls as failures and is restored before exit. It does not alter the
+guest or Windows settings. Runtime r12 fails this test; the r13 correction must
+pass before the shared-memory backend can rely on these functions.

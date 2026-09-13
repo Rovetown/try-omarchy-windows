@@ -36,8 +36,8 @@ typedef uint32_t DWORD;
 #define FALSE 0
 #define DUPLICATE_SAME_ACCESS 2
 #define MAP_FAILED ((void *)(intptr_t)-1)
-#define MAP_ANONYMOUS 1
-#define MAP_FIXED 2
+#define MAP_ANONYMOUS 0x20
+#define MAP_FIXED 0x10
 #define PROT_EXEC 4
 static const int token = 0x40000001;
 static struct { int token; HANDLE handle; } os_win32_handles[1];
