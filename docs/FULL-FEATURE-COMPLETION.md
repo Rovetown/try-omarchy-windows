@@ -397,6 +397,6 @@ service; the clipboard tests do not count as drag-and-drop acceptance.
 The final interactive Windows run passed 335 tests with runtime r6 and no
 failures. Four Python interop tests run on Linux; the firewall lifecycle test
 retains its separate opt-in. Test executable SHA256:
-`7fc26b6671a9e2b2bb686453f49312a2b7ccde2ac21614ba95f1c3a93ca05d86`.
+`51904380e51a1c1ef8f4f629e872373e5c4a62cf2ffb296bf22acfc03a0b0cb1`.
 AMD64 test compilation, Windows vet and the ARM64 launcher build passed. The
 new helpers still need the combined guest-image and physical acceptance round.

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -27,6 +28,8 @@ func clipboardFilesCache() (string, error) {
 }
 
 func clipboardGetFilePaths() ([]string, bool) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	if !openClipboard() {
 		return nil, false
 	}
@@ -104,6 +107,8 @@ func clipboardSetFiles(item clipItem) bool {
 }
 
 func clipboardSetFilePaths(paths []string) bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	data := make([]byte, 20)
 	binary.LittleEndian.PutUint32(data, 20)
 	binary.LittleEndian.PutUint32(data[16:], 1)
