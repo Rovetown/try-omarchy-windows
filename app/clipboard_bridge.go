@@ -31,17 +31,18 @@ type clipBridge struct {
 	// sequence reports the Windows clipboard sequence number when available,
 	// so an unchanged clipboard (which may hold a large image) is not read
 	// and converted on every poll.
-	sequence         func() uint32
-	lastSequence     uint32
-	transfers        *fileTransferService
-	transferEnabled  bool
-	outgoingTransfer string
-	showTransfer     func(*transferProgress)
-	transferError    func(error)
-	getPaths         func() ([]string, bool)
-	setPaths         func([]string) bool
-	setDropPaths     func([]string) bool
-	dropRequests     chan []string
+	sequence            func() uint32
+	lastSequence        uint32
+	transfers           *fileTransferService
+	transferEnabled     bool
+	transferNegotiating bool
+	outgoingTransfer    string
+	showTransfer        func(*transferProgress)
+	transferError       func(error)
+	getPaths            func() ([]string, bool)
+	setPaths            func([]string) bool
+	setDropPaths        func([]string) bool
+	dropRequests        chan []string
 }
 
 func (b *clipBridge) acceptPush(l net.Listener) {
@@ -86,20 +87,43 @@ func (b *clipBridge) acceptPull(l net.Listener) {
 		if err != nil {
 			return
 		}
-		c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-		hello, _ := bufio.NewReader(io.LimitReader(c, 64)).ReadString('\n')
-		c.SetReadDeadline(time.Time{})
 		b.mu.Lock()
-		b.transferEnabled = hello == "transfer-v1\n" && b.transfers != nil
 		if b.pullConn != nil {
 			b.pullConn.Close()
 		}
 		b.pullConn = c
+		b.transferEnabled = false
+		b.transferNegotiating = true
 		b.state = clipboardSyncState{}
 		b.mu.Unlock()
 		logf("clipboard: guest connected")
 		b.sendCurrentHost(c)
+		// Legacy guests never send a greeting. Release their initial file
+		// selection after a short grace period, but keep listening so a slow
+		// current guest can still negotiate streaming on this connection.
+		timer := time.AfterFunc(300*time.Millisecond, func() {
+			b.finishTransferNegotiation(c, false)
+		})
+		go func() {
+			hello, _ := bufio.NewReader(io.LimitReader(c, 64)).ReadString('\n')
+			timer.Stop()
+			b.finishTransferNegotiation(c, hello == "transfer-v1\n")
+		}()
+
 	}
+}
+
+// A late greeting may upgrade only the connection that sent it.
+func (b *clipBridge) finishTransferNegotiation(c net.Conn, capable bool) {
+	b.mu.Lock()
+	if b.pullConn != c || (!b.transferNegotiating && (!capable || b.transferEnabled)) {
+		b.mu.Unlock()
+		return
+	}
+	b.transferNegotiating = false
+	b.transferEnabled = capable && b.transfers != nil
+	b.mu.Unlock()
+	b.sendCurrentHost(c)
 }
 
 func (b *clipBridge) pollHost() {
@@ -107,12 +131,13 @@ func (b *clipBridge) pollHost() {
 		time.Sleep(400 * time.Millisecond)
 		b.mu.Lock()
 		conn := b.pullConn
+		lastSequence := b.lastSequence
 		b.mu.Unlock()
 		if conn == nil {
 			continue
 		}
 		if b.sequence != nil {
-			if seq := b.sequence(); seq == b.lastSequence {
+			if seq := b.sequence(); seq == lastSequence {
 				continue
 			}
 		}
@@ -125,6 +150,11 @@ func (b *clipBridge) sendCurrentHost(conn net.Conn) {
 	defer b.mu.Unlock()
 	if b.pullConn != conn {
 		return
+	}
+	if b.transferNegotiating && b.getPaths != nil {
+		if _, files := b.getPaths(); files {
+			return
+		}
 	}
 	if b.sequence != nil {
 		b.lastSequence = b.sequence()

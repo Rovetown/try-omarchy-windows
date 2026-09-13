@@ -142,7 +142,7 @@ func TestNativeQEMUFileDropEvent(t *testing.T) {
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	cmd := exec.Command(tool, "-machine", "q35,accel=tcg", "-m", "64", "-S", "-nodefaults", "-device", "VGA", "-display", "sdl,gl=off", "-qmp", "tcp:"+address+",server=on,wait=off")
+	cmd := exec.Command(tool, "-machine", "q35,accel=tcg", "-m", "64", "-S", "-nodefaults", "-device", displayDevice(&config{displays: 1, displayWidth: 800, displayHeight: 600}, "256M"), "-display", "sdl,gl=off", "-name", appTitle, "-qmp", "tcp:"+address+",server=on,wait=off")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -176,25 +176,71 @@ func TestNativeQEMUFileDropEvent(t *testing.T) {
 	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	var rect [4]int32
-	user32.NewProc("GetWindowRect").Call(hwnd, uintptr(unsafe.Pointer(&rect[0])))
+
+	done := make(chan struct{})
+	go func() { defer close(done); showFileDropWindow([]string{path}) }()
+	class, _ := syscall.UTF16PtrFromString("TryOmarchyFileDrops")
+	var source uintptr
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		source, _, _ = user32.NewProc("FindWindowW").Call(uintptr(unsafe.Pointer(class)), 0)
+		list, _, _ := user32.NewProc("GetDlgItem").Call(source, 4600)
+		count, _, _ := procSendMessageW.Call(list, 0x18b, 0, 0)
+		visible, _, _ := procIsWindowVisible.Call(source)
+		if source != 0 && count == 1 && visible != 0 {
+			ready = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !ready {
+		if source != 0 {
+			procPostMessageW.Call(source, wmClose, 0, 0)
+		}
+		t.Fatal("native drag source did not become ready")
+	}
+	defer func() {
+		procPostMessageW.Call(source, wmClose, 0, 0)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("native drag source did not close")
+		}
+	}()
+	width, _, _ := user32.NewProc("GetSystemMetrics").Call(0)
+	procShowWindow.Call(hwnd, 9) // SW_RESTORE, so both windows remain visible.
+	procSetWindowPos.Call(hwnd, 0, width/2, 40, width/2, 500, 0x10)
+	procSetWindowPos.Call(source, 0, 0, 40, width/2, 380, 0x10)
+	// Foreground stealing is restricted after earlier UI tests. Activate the
+	// source with the same caption click a user would make before dragging.
 	mouse := user32.NewProc("mouse_event")
 	cursor := user32.NewProc("SetCursorPos")
 	defer mouse.Call(4, 0, 0, 0, 0)
-	cursor.Call(uintptr(rect[0]+20), uintptr(rect[1]+20))
+	cursor.Call(width/4, 50)
 	mouse.Call(2, 0, 0, 0, 0)
-	released := make(chan struct{})
-	go func() {
-		defer close(released)
-		time.Sleep(300 * time.Millisecond)
-		cursor.Call(uintptr((rect[0]+rect[2])/2), uintptr((rect[1]+rect[3])/2))
-		time.Sleep(500 * time.Millisecond)
-		mouse.Call(4, 0, 0, 0, 0)
-	}()
-	if err := dragHostFiles(0, []string{path}); err != nil {
-		t.Fatal(err)
+	mouse.Call(4, 0, 0, 0, 0)
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		foreground, _, _ := procGetForegroundWindow.Call()
+		if foreground == source {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("drag source did not become active")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	<-released
+	point := [2]int32{32, 72} // First received-file row, in client coordinates.
+	user32.NewProc("ClientToScreen").Call(source, uintptr(unsafe.Pointer(&point[0])))
+	cursor.Call(uintptr(point[0]), uintptr(point[1]))
+	mouse.Call(2, 0, 0, 0, 0)
+	time.Sleep(100 * time.Millisecond)
+	cursor.Call(uintptr(point[0]+12), uintptr(point[1]+12))
+	time.Sleep(200 * time.Millisecond)
+	cursor.Call(width*3/4, 250)
+	time.Sleep(500 * time.Millisecond)
+	mouse.Call(4, 0, 0, 0, 0)
 	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	for c.lines.Scan() {
 		paths, ok := droppedFilesEvent(c.lines.Text())
@@ -210,5 +256,11 @@ func TestNativeQEMUFileDropEvent(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("native OLE drop did not reach the SDL QMP event", c.lines.Err())
+	status := ""
+	if value, ok := fileDropWindows.Load(source); ok {
+		var text [1024]uint16
+		procGetWindowTextW.Call(value.(*fileDropWindow).status, uintptr(unsafe.Pointer(&text[0])), uintptr(len(text)))
+		status = syscall.UTF16ToString(text[:])
+	}
+	t.Fatal("native OLE drop did not reach the SDL QMP event", c.lines.Err(), status)
 }

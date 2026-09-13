@@ -203,7 +203,7 @@ func showFileDropWindow(paths []string) {
 		return
 	}
 	title, _ := syscall.UTF16PtrFromString("Files between Windows and Omarchy")
-	hwnd, _, _ := procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), wsCaption|wsSysmenu|wsVisible, 100, 100, 580, 380, 0, 0, instance, 0)
+	hwnd, _, _ := procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)), wsCaption|wsSysmenu, 100, 100, 580, 380, 0, 0, instance, 0)
 	if hwnd == 0 {
 		return
 	}
@@ -229,6 +229,7 @@ func showFileDropWindow(paths []string) {
 	control("BUTTON", "Close", 452, 302, 100, 28, 2, wsTabstop)
 	shell32.NewProc("DragAcceptFiles").Call(hwnd, 1)
 	comctl32.NewProc("SetWindowSubclass").Call(state.list, fileDropListCallback, 1, 0)
+	procShowWindow.Call(hwnd, swShow)
 	procSetForegroundWindow.Call(hwnd)
 	var message msgStruct
 	for {

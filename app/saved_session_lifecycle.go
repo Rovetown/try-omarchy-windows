@@ -12,7 +12,9 @@ import (
 
 // A coordinator serializes changes to one guest. Successful saves leave that
 // guest stopped until the launcher has observed its process exit. Failed saves
-// recover through a fresh context even when the user's operation was cancelled.
+// recover through a fresh connection and context even after cancellation.
+// A failed attempt closes its supplied feature-control client; callers open
+// a new client for subsequent operations. The supervisor has its own stream.
 type savedSessionCoordinator struct{ mu sync.Mutex }
 
 func (s *savedSessionCoordinator) Save(ctx context.Context, c *qmpClient, source, destination string, identity savedSessionIdentity, progress backupProgress) (record savedSessionRecord, err error) {

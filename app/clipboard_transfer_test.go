@@ -112,12 +112,19 @@ func TestClipboardTransferNegotiation(t *testing.T) {
 	}
 	defer listener.Close()
 	go bridge.acceptPull(listener)
-	for index, capable := range []bool{false, true} {
+	for index, capable := range []bool{false, true, true} {
 		conn, err := net.Dial("tcp", listener.Addr().String())
 		if err != nil {
 			t.Fatal(err)
 		}
 		conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if index == 2 {
+			// Read the legacy response after the grace period, then advertise
+			// capabilities on the same connection as a delayed guest would.
+			if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if capable {
 			conn.Write([]byte("transfer-v1\n"))
 		}
