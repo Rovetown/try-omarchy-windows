@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "winq-emu-alpha10-source-r6",
+  "name": "winq-emu-alpha10-source-r7",
   "sourceDateEpoch": 1777269494,
   "qemu": {
     "repository": "https://github.com/cmspam/winq-emu-qemu.git",
@@ -33,6 +33,10 @@
       {
         "file": "patches/qemu/0006-preserve-complete-usb-port-identities.patch",
         "sha256": "f9f89d8454d7bc9cba96f967f4905c9534d5a4210a74404ea933c5727f694f47"
+      },
+      {
+        "file": "patches/qemu/0007-report-native-file-drops.patch",
+        "sha256": "4d4e8db33eed59b1cdeb14500e3d41df8ef679b9e81def0f14d0b48f5d70c5ae"
       }
     ]
   },

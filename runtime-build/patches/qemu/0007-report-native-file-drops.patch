@@ -1,0 +1,113 @@
+diff --git i/qapi/ui.json w/qapi/ui.json
+index f71c50a..e65905a 100644
+--- i/qapi/ui.json
++++ w/qapi/ui.json
+@@ -1725,3 +1725,18 @@
+ { 'command': 'client_migrate_info',
+   'data': { 'protocol': 'str', 'hostname': 'str', '*port': 'int',
+             '*tls-port': 'int', '*cert-subject': 'str' } }
++
++##
++# @DISPLAY_FILE_DROP:
++#
++# Files dropped by the host user on an SDL display window. File contents are
++# transferred by the launcher, never opened by the guest through this event.
++#
++# @display: QEMU console index receiving the drop.
++#
++# @files: Absolute host paths from the native drop operation.
++#
++# Since: 11.0
++##
++{ 'event': 'DISPLAY_FILE_DROP',
++  'data': { 'display': 'int', 'files': [ 'str' ] } }
+diff --git i/ui/sdl2.c w/ui/sdl2.c
+index c7f1776..7e2f22a 100644
+--- i/ui/sdl2.c
++++ w/ui/sdl2.c
+@@ -34,6 +34,7 @@
+ #include "system/system.h"
+ #include "qemu/log.h"
+ #include "qemu-main.h"
++#include "qapi/qapi-events-ui.h"
+ 
+ #ifdef CONFIG_X11
+ #include <X11/Xlib.h>
+@@ -679,6 +680,65 @@ static void handle_windowevent(SDL_Event *ev)
+     }
+ }
+ 
++/* SDL reports one path at a time, bracketed by begin/complete events. */
++static strList *sdl_drop_files;
++static strList **sdl_drop_tail = &sdl_drop_files;
++static size_t sdl_drop_bytes;
++static unsigned sdl_drop_count;
++static uint32_t sdl_drop_window;
++static bool sdl_drop_invalid;
++
++static void sdl_drop_reset(uint32_t window)
++{
++    qapi_free_strList(sdl_drop_files);
++    sdl_drop_files = NULL;
++    sdl_drop_tail = &sdl_drop_files;
++    sdl_drop_bytes = 0;
++    sdl_drop_count = 0;
++    sdl_drop_window = window;
++    sdl_drop_invalid = false;
++}
++
++static void handle_file_drop(SDL_Event *event)
++{
++    struct sdl2_console *target;
++    size_t length;
++    strList *entry;
++
++    switch (event->type) {
++    case SDL_DROPBEGIN:
++        sdl_drop_reset(event->drop.windowID);
++        break;
++    case SDL_DROPFILE:
++        length = event->drop.file ? strlen(event->drop.file) : 0;
++        if (sdl_drop_window != event->drop.windowID || !length ||
++            length > 32768 || ++sdl_drop_count > 1000 ||
++            sdl_drop_bytes + length > 131072 ||
++            !g_utf8_validate(event->drop.file, -1, NULL) ||
++            !g_path_is_absolute(event->drop.file)) {
++            sdl_drop_invalid = true;
++        }
++        if (!sdl_drop_invalid) {
++            entry = g_new0(strList, 1);
++            entry->value = g_strdup(event->drop.file);
++            *sdl_drop_tail = entry;
++            sdl_drop_tail = &entry->next;
++            sdl_drop_bytes += length;
++        }
++        SDL_free(event->drop.file);
++        break;
++    case SDL_DROPCOMPLETE:
++        target = get_scon_from_window(event->drop.windowID);
++        if (target && !sdl_drop_invalid && sdl_drop_files &&
++            sdl_drop_window == event->drop.windowID) {
++            qapi_event_send_display_file_drop(
++                qemu_console_get_index(target->dcl.con), sdl_drop_files);
++        }
++        sdl_drop_reset(0);
++        break;
++    }
++}
++
+ void sdl2_poll_events(struct sdl2_console *scon)
+ {
+     SDL_Event ev1, *ev = &ev1;
+@@ -695,6 +755,11 @@ void sdl2_poll_events(struct sdl2_console *scon)
+ 
+     while (SDL_PollEvent(ev)) {
+         switch (ev->type) {
++        case SDL_DROPBEGIN:
++        case SDL_DROPFILE:
++        case SDL_DROPCOMPLETE:
++            handle_file_drop(ev);
++            break;
+         case SDL_KEYDOWN:
+             idle = 0;
+             handle_keydown(ev);
