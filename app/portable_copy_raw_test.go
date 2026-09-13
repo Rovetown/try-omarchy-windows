@@ -46,7 +46,7 @@ func TestRawPortableCopyBudgetsUsedBlocks(t *testing.T) {
 	t.Cleanup(func() { diskFreeBytes = previous })
 	diskFreeBytes = func(string) (int64, error) { return diskSpaceReserve + 4<<20, nil }
 	data := filepath.Join(t.TempDir(), "data")
-	if err := stageRawPortableData(dir, data, disk, tool, nil); err != nil {
+	if err := stageDirectPortableData(dir, data, disk, tool, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, excluded := range []string{"vm/disk.raw", "checkpoints", "source.zip"} {
@@ -66,7 +66,7 @@ func TestRawPortableCopyBudgetsUsedBlocks(t *testing.T) {
 	}
 	diskFreeBytes = func(string) (int64, error) { return diskSpaceReserve, nil }
 	blocked := filepath.Join(t.TempDir(), "data")
-	if err := stageRawPortableData(dir, blocked, disk, tool, nil); !errors.Is(err, errInsufficientDiskSpace) {
+	if err := stageDirectPortableData(dir, blocked, disk, tool, nil); !errors.Is(err, errInsufficientDiskSpace) {
 		t.Fatalf("expected space rejection, got %v", err)
 	}
 	if _, err := os.Lstat(blocked); !os.IsNotExist(err) {

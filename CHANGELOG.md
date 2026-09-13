@@ -4,6 +4,8 @@
 
 - Create portable copies of normal installations directly as verified QCOW2
   disks, budgeting nonzero blocks instead of staging a backup and raw restore.
+- Copy existing portable installations directly too, with authenticated backing
+  images, independent output disks and no intermediate raw materialization.
 - Retry transient Windows file locks during move and snapshot publication.
 
 ## v0.0.18-preview - 2026-09-13
