@@ -1,0 +1,40 @@
+From 82a9dbff9fed29f9ef17f9fef048a690a032a83f Mon Sep 17 00:00:00 2001
+From: Try Omarchy <test@localhost>
+Date: Mon, 14 Sep 2026 18:26:48 -0400
+Subject: [PATCH] Deliver the corrected runtime repository to existing guests
+
+Bump compatibility to 21 so a v18 disk on the same kernel receives the updated package repository rather than skipping the initramfs overlay.
+---
+ guest/scripts/finalize-rootfs.sh | 2 +-
+ guest/tests/verify.py            | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/guest/scripts/finalize-rootfs.sh b/guest/scripts/finalize-rootfs.sh
+index 1a1e4cd..18feef4 100755
+--- a/guest/scripts/finalize-rootfs.sh
++++ b/guest/scripts/finalize-rootfs.sh
+@@ -133,7 +133,7 @@ kernel_release=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '
+ }
+ # Bump this revision whenever compat-overlay.tar changes in a way that must be
+ # applied to persistent disks created by an earlier launcher release.
+-compat_revision=20
++compat_revision=21
+ printf '%s:%s\n' "$compat_revision" "$kernel_release" >/usr/share/try-omarchy/compat-version
+ 
+ # Never let the container host's hardware autodetection remove the virtual
+diff --git a/guest/tests/verify.py b/guest/tests/verify.py
+index cd7fbc0..4a0003b 100755
+--- a/guest/tests/verify.py
++++ b/guest/tests/verify.py
+@@ -261,7 +261,7 @@ def main() -> None:
+ 
+     finalize_rootfs = read(GUEST / "scripts/finalize-rootfs.sh")
+     check(
+-        "compat_revision=20" in finalize_rootfs
++        "compat_revision=21" in finalize_rootfs
+         and "usr/local/lib/try-omarchy/catch-up" in finalize_rootfs
+         and "usr/share/try-omarchy/skel-fragments/hypr-monitors-qemu.append.lua" in finalize_rootfs
+         and "etc/systemd/user/omarchy-fcitx5.service.d/10-try-omarchy.conf" in finalize_rootfs
+-- 
+2.55.0
+

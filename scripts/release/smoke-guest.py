@@ -100,7 +100,7 @@ def main() -> None:
     parser.add_argument("--network-address", help="verify TCP and UDP forwarding through this host IPv4 address")
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm", help="use TCG for nested Windows runtime testing")
     parser.add_argument("--login-delay", type=float, help="wait for provisioning before the first serial login; TCG defaults to 60 seconds")
-    parser.add_argument("--compat-revision", type=int, default=20, help="expected guest compatibility revision; use 18 for the signed v17 baseline or 19 for guest-r2")
+    parser.add_argument("--compat-revision", type=int, default=21, help="expected guest compatibility revision; use 18 for the signed v17 baseline or 19 for guest-r2")
     parser.add_argument("--disk-image", type=Path, help="disposable test disk, for example an expanded QCOW2 overlay of the factory image")
     parser.add_argument("--disk-format", choices=("raw", "qcow2"), default="raw")
     parser.add_argument("--file-transfer-round-trip", action="store_true", help="exercise native Windows bridge file drops with the opt-in Windows test process")

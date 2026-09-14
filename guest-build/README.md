@@ -18,7 +18,8 @@ What the patches change (the original graphics path was proven on hardware
 2026-08-28; later additions are covered by contract, release-smoke, and nested
 Windows VM tests unless noted in the release checklist):
 
-- Compatibility revision 20 carries Venus presentation workarounds into both
+- Compatibility revision 21 delivers the corrected runtime repository to existing
+  guests even when the external kernel is unchanged. Revision 20 carries Venus presentation workarounds into both
   the UWSM desktop and login shells, including persistent-disk upgrades.
   `VN_PERF=no_async_present` avoids the Mesa 26.2.2 acquisition/presentation lock
   deadlock reproduced on the Windows AMD renderer. The supported loader option
