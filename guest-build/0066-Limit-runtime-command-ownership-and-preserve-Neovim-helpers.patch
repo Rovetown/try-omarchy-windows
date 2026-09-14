@@ -1,4 +1,4 @@
-From 7b7b467dfbb58680e0a889d1a65ce540468af3f9 Mon Sep 17 00:00:00 2001
+From 63e6b125328197fa5f26cf0283e579c426c4c488 Mon Sep 17 00:00:00 2001
 From: Try Omarchy <test@localhost>
 Date: Mon, 14 Sep 2026 18:21:14 -0400
 Subject: [PATCH] Limit runtime command ownership and preserve Neovim helpers
@@ -6,11 +6,11 @@ Subject: [PATCH] Limit runtime command ownership and preserve Neovim helpers
 
 ---
  guest/scripts/register-omarchy-runtime.sh     | 19 +++-
- guest/scripts/runtime-ownership.install       | 44 +++++++++
+ guest/scripts/runtime-ownership.install       | 45 +++++++++
  guest/spec.json                               |  2 +-
- guest/tests/test_runtime_ownership_install.py | 75 ++++++++++++++
+ guest/tests/test_runtime_ownership_install.py | 83 ++++++++++++++++
  guest/tests/test_runtime_package.py           | 99 +++++++++++++++++++
- 5 files changed, 234 insertions(+), 5 deletions(-)
+ 5 files changed, 243 insertions(+), 5 deletions(-)
  create mode 100644 guest/scripts/runtime-ownership.install
  create mode 100644 guest/tests/test_runtime_ownership_install.py
  create mode 100644 guest/tests/test_runtime_package.py
@@ -70,10 +70,10 @@ index 2f696b6..b82a514 100755
  # package and the upstream updater attempts to hand it to yay.
 diff --git a/guest/scripts/runtime-ownership.install b/guest/scripts/runtime-ownership.install
 new file mode 100644
-index 0000000..7438306
+index 0000000..d590175
 --- /dev/null
 +++ b/guest/scripts/runtime-ownership.install
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,45 @@
 +# Older runtime packages accidentally claimed helpers owned by omarchy-nvim.
 +# libalpm removes dropped paths during upgrade even when another package owns
 +# them. Retain the installed bytes before removal; never overwrite a file that
@@ -85,6 +85,7 @@ index 0000000..7438306
 +    path=/usr/bin/$name
 +    pacman -Qlq try-omarchy-runtime 2>/dev/null | grep -Fx "$path" >/dev/null || continue
 +    pacman -Qlq omarchy-nvim 2>/dev/null | grep -Fx "$path" >/dev/null || continue
++    [[ -e $path || -L $path ]] || continue
 +    [[ -f $path || -L $path ]] || return 1
 +    [[ ! -L $state ]] || return 1
 +    if [[ ! -e $state ]]; then
@@ -133,10 +134,10 @@ index a6163df..0a26703 100644
      "omarchyPackagesRepository": "https://github.com/omacom-io/omarchy-pkgs",
 diff --git a/guest/tests/test_runtime_ownership_install.py b/guest/tests/test_runtime_ownership_install.py
 new file mode 100644
-index 0000000..be1cac8
+index 0000000..c232575
 --- /dev/null
 +++ b/guest/tests/test_runtime_ownership_install.py
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,83 @@
 +import os
 +from pathlib import Path
 +import subprocess
@@ -204,6 +205,14 @@ index 0000000..be1cac8
 +        self.fake('pacman', '[[ $2 != try-omarchy-runtime ]] || exit 1\nprintf "%s\\n" "$HELPERS/omarchy-nvim-setup"')
 +        self.assertEqual(self.invoke('pre_upgrade').returncode, 0)
 +        self.assertFalse(self.state.exists())
++
++    def test_missing_helper_does_not_prevent_preserving_the_other(self):
++        self.refresh.unlink()
++        self.assertEqual(self.invoke('pre_upgrade').returncode, 0)
++        self.setup.unlink()
++        self.assertEqual(self.invoke('post_upgrade').returncode, 0)
++        self.assertEqual(self.setup.read_text(), 'administrator customization\n')
++        self.assertFalse(self.refresh.exists())
 +
 +    def test_rejects_symlink_recovery_directory(self):
 +        elsewhere = self.base / 'elsewhere'

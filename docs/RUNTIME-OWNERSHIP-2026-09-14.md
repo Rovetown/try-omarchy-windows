@@ -41,13 +41,14 @@ The successful run verifies:
 - Another boot with the released v18 kernel/initramfs preserves those results.
 
 The released Neovim package already reports a missing
-`/etc/skel/.config/nvim/lua/plugins/theme.lua`. The test requires its missing-file
+`/etc/skel/.config/nvim/lua/plugins/theme.lua`. Tracked separately in [#119](https://github.com/omacom/try-omarchy-windows/issues/119).
+The test requires its missing-file
 diagnostics to remain exactly unchanged; it does not claim that package is wholly
 intact. This is separate from the two helper ownership errors repaired here.
 
-Eight unprivileged packaging/migration tests cover archive membership, invalid
+Nine unprivileged packaging/migration tests cover archive membership, invalid
 command links, database-check failure, regular-file/symlink preservation, replay,
-existing replacement files, absent shared ownership and unsafe recovery-directory
+existing replacement files, a missing helper, absent shared ownership and unsafe recovery-directory
 links. The complete reconstructed guest contract and existing smoke parser tests
 also pass.
 
@@ -76,6 +77,8 @@ Local evidence: `/home/bts/Projects/try-omarchy-evidence/issue116-run04`.
 | 02-reboot.log | `14375532d22250c215cab7c224069d52d2ab0577c269a519e9cb876241b5b3d3` |
 
 Earlier runs retained the observed file-removal failure and intermediate migration
-failures. The successful run above includes the final preservation behavior.
+failures. The successful run above includes the preservation behavior. A subsequent
+unprivileged regression also verifies that an already-missing helper does not
+prevent preserving the other one.
 Published v18 assets remain unchanged; this repair requires a new guest payload
 and installation of the updated runtime package inside an existing guest.
