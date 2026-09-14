@@ -4,6 +4,25 @@ Use a separate data folder and a copy of any existing guest. Keep the original
 backup untouched. Follow [RELEASING.md](RELEASING.md) for running a signed draft
 candidate against locally served, authenticated assets.
 
+## Help complete the v1 hardware matrix
+
+The published baseline is [v0.0.18-preview](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview).
+The next candidate has not been published. Reports on v18 are useful, but must
+not be recorded as acceptance of unreleased master changes. Maintainers should
+pin one signed candidate and its launcher/runtime/guest hashes in
+[issue #77](https://github.com/omacom/try-omarchy-windows/issues/77) before the
+combined candidate round.
+
+Most useful additional hosts: Intel or NVIDIA graphics, full Hyper-V enabled,
+Core Ultra, Windows 10, and physical monitors with different scaling. The existing
+AMD Windows 11 evidence is linked in [V1-READINESS.md](V1-READINESS.md).
+
+For an initial report, record the details below and test boot, GPU/CPU rendering,
+keyboard focus, clipboard, video/audio, shutdown and relaunch. If available, add
+sleep/resume, mixed-DPI movement and headphone switching. Report only what you
+actually tested; one host need not complete every checklist. Maintainers should
+run destructive interruption tests only on disposable copies.
+
 ## Report details
 
 Copy this into #77 or the relevant issue. Mark untested items as untested.
@@ -42,6 +61,8 @@ personal details. Do not upload the guest disk or a full backup.
 - [ ] Text clipboard works in both directions, including Unicode, trailing
   newlines, copying an earlier value again, and reconnecting after a guest reboot.
 - [ ] Shared files can be read and written from both sides.
+- [ ] File/folder clipboard and transfer windows work in both directions with
+  Unicode names, empty directories and matching file hashes; originals remain intact.
 - [ ] Audio playback, device switching, and video work. Note microphone activity
   at idle and when an app starts and stops recording.
 - [ ] Resize, fullscreen, and movement between monitors with different scaling.
@@ -113,7 +134,7 @@ Use the copied guest for interruption and low-space tests.
   With Omarchy closed and the matching original factory payload restored,
   returning that retained pair to `vm` should recover the previous guest.
 
-## Installation moves in the next preview
+## Installation moves
 
 Use a disposable copy and the candidate launcher throughout. Record source and
 destination filesystem, allocated size, logical disk capacity, elapsed time,

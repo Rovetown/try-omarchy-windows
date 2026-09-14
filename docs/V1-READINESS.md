@@ -1,92 +1,91 @@
-# v1 readiness
+# Road to v1
 
-The Windows app and the Mac app now live under Omacom. A stable Windows release
-still needs the checks below; the open work is tracked in one place, GitHub
-issue #77. A passing build does not establish hardware or
-upgrade reliability.
+Baseline: [v0.0.18-preview](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview),
+published September 13, 2026. The next milestone is a focused v1 release candidate.
+The project remains a preview until the release gates below are satisfied.
 
-The [completion candidate](COMPLETION-CANDIDATE.md) records the v0.0.17
-implementation and planned combined Windows acceptance round. The
-[v0.0.16 candidate report](PREVIEW-16-VALIDATION.md) records earlier signed
-draft and Windows VM checks. The [revision 17 report](MIGRATION-17-VALIDATION.md)
-records additional migration and disk growth tests. Physical acceptance remains open.
+[Issue #77](https://github.com/omacom/try-omarchy-windows/issues/77) tracks delivery
+and links to this document for scope and acceptance requirements. Record results
+with [TESTING.md](TESTING.md), including the exact launcher, runtime and guest.
+A code merge, automated test, physical test and public release are distinct evidence.
 
-## Current guest completion work
+## Intended v1 scope
 
-- [x] Complete the Omarchy 4.0.3 software candidate, including personalized setup,
-  lock authentication and existing-guest browser repair (#89). Merged in #93;
-  see [candidate evidence](COMBINED-CANDIDATE.md).
-- [ ] Reproduce the package lock report (#90) and verify update interruption
-  behavior. The candidate build now rejects a locked package database.
-- [x] Provide and validate in-place upgrades for the locally pinned Omarchy
-  runtime package on existing guests, preserving files and configuration.
-  Exact signed-candidate acceptance remains below.
+A dependable Omarchy desktop on x86_64 Windows, with persistent files, understandable
+resource controls, clipboard and folder transfers, updates, backup and recovery,
+and configuration export to a native Omarchy installation.
 
-See [the September completion audit](audits/2026-09-12-completion.md) for source
-changes, configuration differences and the remaining acceptance work.
+Windows 10 and 11 are currently advertised; each needs explicit acceptance before
+v1 claims support. GPU acceleration depends on host drivers, with CPU rendering
+as fallback. The app runs QEMU on Windows Hypervisor Platform, not a WSL distribution.
 
-## Runtime and release validation
+Portable mode remains experimental pending real installed-guest conversion,
+external-drive lifecycle and second-PC testing. Webcam capture, accelerated RAM
+resume, direct drops into arbitrary guest applications, bridged networking,
+Windows ARM64 and booting an existing physical installation are outside the v1
+commitment. Multiple display windows exist; that does not establish physical
+mixed-DPI or multi-monitor input acceptance. Borderless mode is optional follow-up.
 
-- [ ] Validate the source-built runtime on physical Windows hardware, including full Hyper-V. Record archive hashes and results using
-  [RUNTIME-VALIDATION.md](RUNTIME-VALIDATION.md).
-- [x] Pin the source-built runtime and matching source archive in
-  `guest-build/runtime.lock.json`. The published archives match source revision 3
-  and the current build recipe. Physical matrix acceptance remains open.
-- [ ] Verify signed draft preparation and publication using
-  [RELEASING.md](RELEASING.md). A successful signing check alone does not
-  establish that the full release workflow works.
-- [ ] Test a copied pre-transfer installation through the signed update path
-  into the current candidate. Verify redirects, preserved files, and rollback
-  separately from preview-to-stable migration.
-- [ ] Prepare release notes and verify public download links, signatures, and
-  versions after publication.
+Before stable publication, document maintainer ownership, the issue-reporting
+route and supported host combinations. Official positioning does not imply that
+every Windows device or every native Omarchy feature has been validated.
 
-## Shipped features requiring candidate regression checks
+## Shipped baseline and evidence
 
-- [#34](https://github.com/omacom/try-omarchy-windows/pull/34): stable updates,
-  including a bridge for installations that skip preview releases.
-- [#35](https://github.com/omacom/try-omarchy-windows/pull/35): disk capacity,
-  in-place growth, and Windows free-space information.
-- [#29](https://github.com/omacom/try-omarchy-windows/pull/29): official artwork,
-  current resources, and splash icon handling.
-- First-run install-location selection shipped in v0.0.12-preview. Repeat its
-  checks on the candidate; moving an existing installation is separate work in
-  [NEXT-RELEASE.md](NEXT-RELEASE.md).
+| Area | Evidence available | Remaining boundary |
+| --- | --- | --- |
+| Omarchy 4.0.3, browser-theme permissions, existing-guest package upgrades | [Guest upgrade validation](GUEST-UPGRADES.md), including preservation fixtures and busy-lock handling | Original stale-lock report #90 and interruption recovery remain open |
+| Installation moves, backup/restore, snapshots/rollback, growth/reclaim, clipboard and transfer windows | [Windows laptop acceptance](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md) | Retest critical paths on the next exact candidate; portable lifecycle is unproven |
+| Source-built graphics runtime and matching source pinned in v18 | Same acceptance record; final r15 Vulkan playback and preserved files | AMD laptop coverage does not establish Intel/NVIDIA or full Hyper-V support |
+| GPU/CPU display paths, idle measurements and one-hour endurance | Same record, with individual runtime revisions identified | Earlier-runtime results are not exact-final-runtime acceptance for every check |
+| Signed release preparation, publication and public download verification | Final publication sections of the acceptance record | Preview-to-stable migration is a separate gate |
 
-## Release gates
+The acceptance record is chronological: later checkpoints supersede earlier
+failures only where a retest is explicitly recorded. v15–17 were unpublished
+candidates; their reports remain historical supporting evidence.
 
-- [x] Reproduce and resolve the configuration report in #32, or document its
-  confirmed cause and supported fix. Fixed in the v0.0.13 image (guest patch 0033).
-- [ ] Test the signed candidate on the Windows hardware matrix, including
-  the source runtime, full Hyper-V, and remote input.
-- [ ] Record fresh install, existing guest upgrade, interrupted update, and
-  forced rollback. Include an old preview that skips the bridge and
-  reaches stable through both signed update feeds.
-- [ ] Verify disk growth inside the guest, unchanged user files, and unchanged
-  capacity after lowering the setting or rolling back the launcher.
-- [ ] Restore a configuration export onto a fresh physical Omarchy install.
-  Confirm package and theme restoration and exclusion of VM-specific state.
-- [x] Finish stopped-VM backup/restore and a clear reset flow before presenting
-  the guest as suitable for persistent work. Shipped in v0.0.12. Configuration export is not a VM
-  backup.
-- [ ] Exercise sleep/resume, mixed-DPI resize, audio-device changes, and a long
-  session. Record idle CPU and whether launch alone activates the microphone.
-- [ ] Update user documentation to describe the tested release, including how
-  existing guests receive Omarchy OS updates separately from launcher updates.
+## Work merged after v18
 
-Use [TESTING.md](TESTING.md) for reports. Each gate needs evidence for the exact
-candidate version and runtime, not only an earlier preview. Keep release
-publication separate from code review and merging.
+- [#113](https://github.com/omacom/try-omarchy-windows/pull/113): direct portable
+  copying from raw disks and bounded retries for temporary Windows publication locks.
+- [#114](https://github.com/omacom/try-omarchy-windows/pull/114): direct independent
+  QCOW2 copies, including verified factory-backed sources.
 
-## Scope
+These changes are on master, not in the published v18 assets. Native automated
+checks passed; large installed-guest portable lifecycle acceptance remains open.
+Include them in the next candidate and identify its hashes before testing.
 
-v1 should provide a dependable way to try Omarchy, keep a trial setup, and take
-its configuration to a full installation. Prioritize reliability, storage,
-recovery, and understandable controls.
+## Remaining release gates
 
-Image clipboard shipped in v0.0.13-preview. File and folder clipboard, reclaim
-controls, and scrolling Settings are implemented for v0.0.17-preview; their
-combined Windows acceptance remains open. Drag-and-drop, multiple guest
-monitors, camera bridging, Windows ARM64, and additional portable launchers
-remain separate work.
-Booting an existing physical installation is outside the v1 scope.
+1. **Updates and recovery.** Reproduce [#90](https://github.com/omacom/try-omarchy-windows/issues/90)
+   on the released image and test interrupted package transactions. Do not remove
+   active package locks. Validate fresh install and preserved existing-guest
+   upgrades on the candidate. Exercise an old pre-transfer installation, both
+   signed feeds, a preview that skips the bridge, preview-to-stable, direct stable
+   installation, stable-to-stable and forced rollback. Record file checksums,
+   versions, redirects and signatures. Launcher rollback does not undo installed
+   guest OS package updates.
+2. **Supported Windows hardware.** Obtain physical Intel and NVIDIA graphics
+   results, full Hyper-V coexistence and Core Ultra virtualization coverage.
+   Record Windows version/edition; include each advertised Windows version and
+   lower-memory hardware. Complete sleep/resume, physical mixed-DPI movement,
+   keyboard/focus and RDP/VNC checks, headphone switching and microphone-indicator
+   observations. Repeat long-session and idle checks on the selected runtime.
+3. **Storage regression.** On the exact candidate, verify move, backup, restore,
+   reset, snapshot rollback, growth and reclaim with preserved fixtures. Include
+   interruption, low space and temporary Windows file locks. Lowering capacity
+   or rolling back the launcher must not shrink an existing disk.
+4. **Native migration.** Restore an export onto a fresh physical Omarchy install;
+   verify actual package/theme restoration and exclusion of VM-specific state.
+5. **Release communication and distribution.** Align README and compatibility
+   documentation with tested support; explain [guest OS updates](GUEST-UPGRADES.md)
+   separately from launcher updates. Prepare stable notes and winget distribution,
+   then verify public downloads, versions and signatures after publication using
+   [RELEASING.md](RELEASING.md).
+
+## Next checkpoint
+
+Resolve the package-lock investigation and run update/recovery acceptance while
+collecting the missing hardware reports. Keep evidence linked from #77. Publish a
+stable candidate only through the normal release process; this document does not
+authorize publication or certify the current preview as stable.
