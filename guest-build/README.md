@@ -18,7 +18,8 @@ What the patches change (the original graphics path was proven on hardware
 2026-08-28; later additions are covered by contract, release-smoke, and nested
 Windows VM tests unless noted in the release checklist):
 
-- Compatibility revision 20 carries Venus presentation workarounds into both
+- Compatibility revision 21 delivers the corrected runtime repository to existing
+  guests even when the external kernel is unchanged. Revision 20 carries Venus presentation workarounds into both
   the UWSM desktop and login shells, including persistent-disk upgrades.
   `VN_PERF=no_async_present` avoids the Mesa 26.2.2 acquisition/presentation lock
   deadlock reproduced on the Windows AMD renderer. The supported loader option
@@ -99,3 +100,9 @@ to the generated branch for manual review; `--check` reports drift without writi
 ```bash
 scripts/release/refresh-guest-lock.sh
 ```
+
+Patch 0066 limits runtime command ownership to materialized upstream commands,
+bumps the runtime package to `4.0.3-4`, and preserves the two dependency-owned
+Neovim helpers when upgrading older runtime packages. Database consistency is
+checked during registration and guest smoke testing. See the
+[runtime ownership validation](../docs/RUNTIME-OWNERSHIP-2026-09-14.md).
