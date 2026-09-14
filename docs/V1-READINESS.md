@@ -3,6 +3,7 @@
 Baseline: [v0.0.18-preview](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview),
 published September 13, 2026. The next milestone is a focused v1 release candidate.
 The project remains a preview until the release gates below are satisfied.
+For another session, start with [the current handoff](SESSION-RESUME.md).
 
 [Issue #77](https://github.com/omacom/try-omarchy-windows/issues/77) tracks delivery
 and links to this document for scope and acceptance requirements. Record results

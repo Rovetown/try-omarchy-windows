@@ -4,9 +4,11 @@ Current continuation order and release assessment: [SESSION-RESUME.md](SESSION-R
 The sections below preserve the implementation history; later evidence supersedes
 earlier statements about work still to do.
 
-This is the active completion scope requested on September 12, 2026. All eight
-features belong to the finished product. Earlier v1 exclusions are superseded
-by this plan. The signed v17 candidate remains the regression baseline.
+This records the broader feature scope requested on September 12, 2026. On
+September 14 the user approved a focused official-v1 plan; the current scope and
+release gates are in [V1-READINESS.md](V1-READINESS.md). The feature work below
+remains historical evidence and a future backlog, not a requirement to complete
+all eight features before v1. Signed v17 artifacts are historical baselines.
 
 ## Architecture and delivery order
 

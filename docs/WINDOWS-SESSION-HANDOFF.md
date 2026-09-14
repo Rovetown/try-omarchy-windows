@@ -1,14 +1,16 @@
 # Windows session handoff
 
-For the September 13 physical laptop continuation, read
-[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md)
-for current paths, runtime r8–r11 corrections, evidence and unresolved acceptance
-failures. The earlier lab paths and results below are historical.
+Historical Windows lab notes, last updated September 12â€“13, 2026. For the current
+release baseline, merged work, artifacts and next steps, start with
+[SESSION-RESUME.md](SESSION-RESUME.md). The September 14 sessions ran Linux/KVM
+validation and did not re-inspect the Windows host.
 
-Updated September 12, 2026. Start here before further release testing.
+For physical laptop evidence, read the final checkpoints in
+[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md).
+All branch, artifact and release-state descriptions below are historical. The
+current v1 scope is [V1-READINESS.md](V1-READINESS.md).
 
-For the exact checkout, next engineering steps and release assessment, read
-[SESSION-RESUME.md](SESSION-RESUME.md).
+## Historical September 12 lab state
 
 The full-feature work is on `codex/full-feature-completion`. Read
 [FULL-FEATURE-COMPLETION.md](FULL-FEATURE-COMPLETION.md) first for implementation
@@ -62,7 +64,7 @@ When rerunning smoke checks against the signed v17 baseline, pass
 Read [PREVIEW-17-VALIDATION.md](PREVIEW-17-VALIDATION.md) for the signed baseline
 artifacts and [COMPLETION-CANDIDATE.md](COMPLETION-CANDIDATE.md) for its test matrix.
 
-## Current release state
+## Historical release state (September 12)
 
 The signed v0.0.17-preview candidate remains an unpublished draft. Its launcher
 source is `3869987b35f556e779f132c722c258fd14bf5687`. PR #106 contains the feature

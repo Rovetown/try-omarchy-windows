@@ -1,161 +1,135 @@
 # Resume here
 
-Latest continuation: `codex/portable-direct-qcow2` extends direct portable copying
-to standalone and factory-backed QCOW2 inputs, with backing verification before
-and after conversion. Small real-QEMU copy and corruption tests pass. The actual
-installed-guest portable lifecycle is still blocked by host free space.
-An additional cleanup proposal was rejected by automatic review; **do not retry
-those deletions through another route**. Exact additional targets are recorded
-at the end of the acceptance report. No cleanup ran.
+Updated September 14, 2026, after merged PRs #115, #117 and #118.
+The user is working toward an official v1 and approved a focused reliability,
+recovery and hardware-validation plan. Use [V1-READINESS.md](V1-READINESS.md) and
+[issue #77](https://github.com/omacom/try-omarchy-windows/issues/77) for scope and
+remaining gates. The older full-feature plan is historical, not the v1 requirement.
 
-Post-release work: `codex/portable-space-efficiency` replaces raw-installation
-portable creation's archive/raw staging with direct verified QCOW2 conversion.
-Real-QEMU compact-copy, space rejection, cancellation, source preservation and
-native Windows rename-lock tests pass. Windows move/snapshot publication now
-retries transient locks; the complete native suite and vet pass after that fix.
-The large installed-guest copy remains unproven: a guarded attempt stopped at
-preflight without copying payloads after C: free space fell to about 4.9 GiB.
-Do not retry it or remove previously denied recovery data. See the report's
-post-release checkpoint for evidence and the unresolved space change.
+## Repository and release state
 
-Current release decision (September 13, after the laptop acceptance): the user
-explicitly requested publishing **v0.0.18-preview as the latest preview**, with
-proper release notes and external contributor acknowledgments. Ship the tested
-improvements now and continue the remaining full-feature work afterward. This
-supersedes the earlier instruction below against an intermediate preview.
-Release preparation pins the exact tested r15 runtime and compatibility-20 guest;
-the signed-package smoke passed on merged commit
-`5e8e43bb9ce79176e5651fd19379808da8e9570f` (Azure signing-check
-`34787825540`). Publication run `34788070204` passed and
-[v0.0.18-preview is public and Latest](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview).
-An unauthenticated Latest download on this laptop passed Authenticode, checksum,
-version, source-manifest, and signed-update verification. The guest and
-loopback asset server are stopped; the final signed evidence is recorded at the
-end of the laptop acceptance report.
+- Repository: `omacom/try-omarchy-windows`; primary checkout:
+  `/home/bts/Projects/try-omarchy-windows`; base branch: `master`.
+- Latest implementation merge: `b35c98b989ffd1cedf1d40a6f459b092b60b8ef1`
+  ([#118](https://github.com/omacom/try-omarchy-windows/pull/118)). Start from current
+  `origin/master`, which also contains this handoff refresh; inspect local status
+  before switching branches. Other checkouts can have unrelated work.
+- Public Latest remains [v0.0.18-preview](https://github.com/omacom/try-omarchy-windows/releases/tag/v0.0.18-preview),
+  published September 13. No newer signed launcher or public release was made.
+- Unreleased master includes #113/#114 portable-copy and Windows publication-lock
+  improvements, plus #118's runtime ownership repair. The launcher still pins v18.
+- No next release tag has been selected. Use [RELEASING.md](RELEASING.md) to prepare
+  an exact signed candidate; source merges and guest CI artifacts are not releases.
 
-Physical Windows continuation on September 13, 2026 is recorded in
-[WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md).
-Read that report first for laptop paths, current fixes, test evidence and the
-remaining live Windows acceptance work. The sections below retain the prior lab handoff.
+## Completed in the September 14 sessions
 
-Earlier unsigned laptop checkpoint (retained for recovery): runtime r15 build `34781229515` and guest
-compatibility-20 build `34781901160` pass integrated AMD Vulkan playback and
-update delivery. Launcher short/long-path shortcut ownership is fixed in
-`7a15327`; current CI passes. The guest is cleanly stopped. Use
-`C:\cssi\try-omarchy-acceptance\2026-09-13\TryOmarchy-r15-guest20-candidate.exe`
-with the existing `Move 世界\TryOmarchy` installation and explicitly bypass the
-old `C:\WINQ-EMU` discovery path (`-winq` can name the nonexistent acceptance
-`bundled-only` path to select the verified bundled runtime). The local manifest
-was served under `http://127.0.0.1:18080/v0.0.18-preview` before release preparation.
-Portable lifecycle still lacks sufficient free space under its current staging
-requirements. Automatic review denied removal of the completed retained rollback
-copy; do not retry that deletion through another route. Read the report's final
-checkpoint before creating more disks. No host reboot occurred.
+- **#115 merged:** corrected README, compatibility, v1 readiness and test guidance;
+  reconciled #77. Closed #87/#89 with shipped-feature/fix instructions and #88 in
+  favor of the concrete v1 tracker. #111 received rebase/validation feedback.
+- **#117 merged:** investigated #90 using verified v18 artifacts. Fresh image/boot
+  has no pacman lock; normal system-package updates succeeded. Killing a real
+  pacman fixture in a pre-transaction hook leaves a stale lock across reboot;
+  controlled recovery and final reboot preserve data. See
+  [package recovery evidence](PACKAGE-RECOVERY-2026-09-14.md).
+- **#118 merged; #116 closed:** fixed duplicate Neovim helper ownership. Runtime
+  `4.0.3-4` packages only materialized Omarchy commands and preserves the dependency's
+  helper file, symlink and administrator edits through upgrade. Compatibility
+  revision **21** delivers the corrected repository to existing guests even on
+  the same kernel. Patches 0066–0068 contain the fix, five reviewed Arch pin updates,
+  and the delivery revision bump. See [ownership evidence](RUNTIME-OWNERSHIP-2026-09-14.md).
+- Validation passed: final required PR CI; 114 guest tests (one optional skip);
+  complete factory image build/boot; direct v18 package upgrade; all five normal
+  updater boots (seed, update, reboot, old external image, return to candidate).
+  Database, helper ownership/hashes/symlink, installed packages and user data pass.
+  These are Linux/KVM and CI results, not new physical Windows acceptance.
 
-Updated September 12, 2026, after the native file-transfer and recovery round.
+## Reusable candidate and local evidence
 
-## Checkout and current state
+The complete guest candidate comes from
+[CI run 34904145068](https://github.com/omacom/try-omarchy-windows/actions/runs/34904145068),
+built on application commit `9bc4f52`. Artifact `guest-candidate`, ID `10372531418`,
+expires September 21, 2026 at 22:31 UTC; a verified local copy is retained.
+Archive SHA256:
+`ca37c4575df787632f3e7e28dcb83879aadc272df6eafdc0369937f7caf3cb27`.
+The factory is Omarchy 4.0.3, runtime `4.0.3-4`, compatibility 21, kernel
+`7.2.4-arch1-2`. Runtime r15 for Windows remains the published v18 binary; this
+work changed the guest package, not the Windows QEMU runtime.
 
-- Worktree: `/home/bts/Projects/try-omarchy-full-features`.
-- Branch: `codex/full-feature-completion`.
-- PR: [#110](https://github.com/omacom/try-omarchy-windows/pull/110), open and draft.
-- Tested code and evidence checkpoint: `d8e463e6a1ec4e6b5baae703dbd48e1674e4ba78`.
-  All three required CI jobs passed; the optional guest build is a separate run.
-- GitHub identity must be `btsouth`. For CLI calls use
-  `GH_TOKEN="$(gh auth token --user btsouth)" gh ...`.
-- Inspect status before editing. Other Try Omarchy checkouts and runtime source
-  trees may contain unrelated changes; do not reset them.
-- The user wants the entire eight-feature scope completed. An intermediate
-  preview must not silently replace that goal. No Basecamp updates are requested.
-  Access Linear only through Toolport.
+| Local path beneath `/home/bts/Projects/try-omarchy-evidence/` | Contents |
+| --- | --- |
+| `issue116-candidate/` | Verified complete new guest artifacts, including decompressed rootfs, metadata and checksums |
+| `issue116-full-upgrade/` | Successful five-boot normal-updater test, retained disk and logs |
+| `issue116-run04/` | Successful direct package-upgrade/reboot test, copied fixture scripts and disk |
+| `issue90-v18/artifacts/` | Verified published v18 baseline, including decompressed rootfs |
+| `issue90-v18/run02/` | Successful package-lock interruption/recovery test and retained disk |
+| `issue90-v18/builder/` | Reconstructed locked guest builder with patches through 0068 applied |
+| `issue116-build-success.log` | Full successful factory-build/boot CI log |
 
-Read [FULL-FEATURE-COMPLETION.md](FULL-FEATURE-COMPLETION.md) for the full scope,
-[PR-110-REVIEW.md](PR-110-REVIEW.md) for evidence and
-[WINDOWS-SESSION-HANDOFF.md](WINDOWS-SESSION-HANDOFF.md) for artifacts and lab setup.
-The dated implementation sections in those documents are a history; their older
-"next" statements can have been superseded by later results.
+Detailed per-file and log hashes are in the two evidence documents linked above.
+Earlier `issue116-run01`–`run03` and `issue90-v18/run01` retain failed investigation
+runs; they are not successful candidate evidence. Verify checksums before reuse.
 
-## Finished in the last round
+At handoff, no local `qemu-system-x86_64` test process remains. Linux workspace
+free space was about 20 GiB; recheck before creating images. The Windows laptop
+was not contacted or changed in these sessions, so its older free-space and
+process observations are not current facts.
 
-- Runtime r7 reports bounded native SDL file-drop events. Actual OLE dragging
-  from the Windows transfer window into SDL passed, including repeated runs.
-- Windows and guest GTK transfer windows use verified streaming tickets without
-  replacing the clipboard. Guest patch 0063 fixes outgoing archives being staged
-  in the small `/run/user` tmpfs; archives now use the disk-backed XDG cache.
-- Clipboard capability negotiation accepts late greetings on the same connection.
-- Failed saved-session captures reconnect to QMP, settle their disk jobs and
-  resume the original guest. Lost replies and real QEMU failure paths are tested.
-- The interactive Windows suite passed 344 tests. Four Python interop tests pass
-  on Linux; the native firewall test has separate earlier evidence.
-- The rebuilt Omarchy 4.0.3 / compatibility-19 guest passed a real Windows TCG
-  31 MiB Unicode-file round trip in both directions. Both transfer windows,
-  file integrity, unchanged originals and unchanged clipboards were verified.
-- Clean guest contract: 102 tests run, one native GTK opt-in skipped. That GTK
-  adapter has separate native evidence. Linux race tests and Windows builds pass.
+Reproduction entry points:
 
-## Artifacts to reuse
+- `scripts/release/smoke-package-recovery.py`: controlled lock interruption;
+  [instructions](GUEST-UPGRADES.md#package-lock-interruption-test).
+- `scripts/release/smoke-runtime-ownership.py`: direct packaging/upgrade regression;
+  [instructions](RUNTIME-OWNERSHIP-2026-09-14.md#reproduction-and-evidence).
+- `scripts/release/smoke-guest-upgrade.py`: normal updater and five-boot preservation;
+  [instructions](GUEST-UPGRADES.md#validation). Fixtures now check Neovim helper
+  ownership, hashes/symlink and database integrity too.
+- `scripts/release/smoke-guest.py` now defaults to compatibility 21 and runtime
+  `4.0.3-4`, and checks a clean database. It intentionally fails older defective
+  v18 factory-image expectations; use the dedicated baseline-aware runners above
+  for historical-image investigation.
 
-Use runtime `D:\TryOmarchyFullFeaturesTest\runtime-r7` and guest
-`D:\TryOmarchyFullFeaturesTest\guest19-r2`. The older `guest19` has the outgoing
-staging bug. Exact hashes and build links are in the Windows handoff.
+## Remaining work and next steps
 
-Linux guest artifacts are under
-`/data/try-omarchy-feature-guest-artifacts/compat19-r2`; the raw rootfs was
-stream-verified and is expanded on Windows. The directory also retains
-`windows-transfer-smoke.log` and `windows-image-verification.log`.
-Runtime artifacts are under `/data/try-omarchy-feature-runtime-artifacts/r7`.
-Guest build [34731444397](https://github.com/omacom/try-omarchy-windows/actions/runs/34731444397)
-passed all jobs. Downloaded local copies are retained beyond CI artifact expiry.
+1. **#119: audit the missing Neovim skeleton template.** v18 lacks packaged
+   `/etc/skel/.config/nvim/lua/plugins/theme.lua`; this is distinct from the fixed
+   helper ownership. User-visible breakage is not yet established. Investigate
+   expected package/default behavior and new-user theming before choosing a fix;
+   preserve existing users' personal configuration.
+2. **#90: remaining interruption/recovery investigation.** The original reporter's
+   stale-lock cause is unknown. Tests cover SIGKILL before package writes, not
+   power loss during extraction or scriptlets. Keep active locks protected; no
+   automatic lock deletion was added.
+3. **Next signed Windows candidate.** Include unreleased master changes and test
+   actual launcher/payload upgrades, interruption, forced rollback, both signed
+   feeds, pre-transfer installs and old previews skipping the stable bridge.
+   Do not call the guest package regression a Windows update/rollback pass.
+4. **Physical coverage.** Intel/NVIDIA, full Hyper-V/Core Ultra, advertised Windows
+   versions, sleep/resume, mixed-DPI displays, remote input, device switching and
+   microphone behavior remain open. Use [TESTING.md](TESTING.md). Also complete
+   native Omarchy export/restore acceptance and final support/distribution docs.
 
-The complete guest test executable is `drop-session.test.exe`; the earlier
-344-test executable is retained as `drop-session-full-tested.exe` in the Windows
-lab. Use the hashes in the handoff to distinguish them. Reproduction commands
-are in [scripts/vmtest/README.md](../scripts/vmtest/README.md).
+Open issues at this checkpoint: #77, #90, #119. Open PR: #111 (borderless), still
+optional for v1 and requiring rebase/review/Windows validation. Recheck GitHub
+before acting; counts and states can change.
 
-The lab was left idle after successful shutdown. Its `TryOmarchySessionSuite`
-scheduled task is a manual test helper, currently configured for the isolated
-file-transfer fixture. Recheck task/process state before starting another test.
-The nested lab has hypervisor startup disabled following its earlier boot
-failure. Its TCG evidence does not prove physical WHPX, GPU or full Hyper-V
-compatibility. Do not re-enable that configuration without its recovery plan.
+Portable mode stays experimental. Webcam capture, accelerated RAM resume,
+arbitrary-app drops, bridged networking, ARM64 and booting a physical install
+remain outside the accepted v1 scope. Do not resume the old eight-feature plan
+as though all of it blocks v1.
 
-## Concrete continuation order
+## Earlier Windows evidence and recovery context
 
-1. Continue saved-session integration from `app/saved_session_lifecycle.go`,
-   `saved_session_store.go`, `saved_session_disk.go` and `saved_session_runtime.go`.
-   The engine is tested; production launcher save/resume controls and WHPX/virgl
-   state preservation still need implementation. Keep real runtime blockers
-   intact until state preservation is implemented and proven. Do not present a
-   synthetic TCG memory test as accelerated desktop resume acceptance.
-2. Complete the remaining planned implementations: direct drop placement into
-   applications, the camera bridge, bridged networking and the native ARM64
-   runtime/guest/release path. Audit checkpoint incremental storage and the
-   remaining lifecycle work against the full-feature document. Cross-compiling
-   the launcher alone does not establish ARM64 product support.
-3. Close physical acceptance for snapshot/portable recovery, multiple displays,
-   mixed DPI, USB devices, GPU behavior and full Hyper-V coexistence. Test a
-   candidate combining the current launcher, r7 runtime and corrected guest.
-   Feed failures back into code before marking those features complete.
-4. Prepare and sign the integrated release candidate through
-   [RELEASING.md](RELEASING.md), preserving the current signed baseline. Verify
-   fresh installation, real existing-install upgrade, interrupted update and
-   recovery against that exact signed candidate, then official download/update
-   delivery before publication.
+Read [the September 13 laptop acceptance](WINDOWS-LAPTOP-ACCEPTANCE-2026-09-13.md)
+for physical AMD evidence and the final signed v18 publication record. Earlier
+sections describe intermediate failures; use the later explicit retests.
 
-## How close is the next release?
+The Windows record includes cleanup operations rejected by automatic approval
+review. Their exact targets are retained there; do not retry those deletions
+through another route. Re-inventory the host and recoverable data before further
+large portable tests. A current session's user instructions take precedence over
+historical plans, but old evidence is not permission for new publication, cleanup
+or messages to other people.
 
-A substantial preview is close enough to move into integrated candidate
-packaging and physical acceptance if the user chooses an intermediate release.
-The current components and automated coverage provide a strong starting point,
-but the new feature set has not yet passed that signed candidate round.
-
-The user's full-feature release remains an engineering project, not just a
-Windows test pass away. Accelerated saved sessions are the largest uncertainty;
-camera, bridged networking, direct application drops and native ARM64 also need
-implementation. Do not give a completion percentage or date from test counts.
-
-Live release state checked for this handoff: public latest is v0.0.14-preview;
-v0.0.15, v0.0.16 and v0.0.17-preview are unpublished drafts. The signed v17
-candidate predates PR #110 and is only a regression baseline for this work.
-No new release version has been selected or published. Recheck remote state
-before choosing a tag, merging or changing release metadata.
+[Archived session notes](SESSION-RESUME-2026-09-13.md) and
+[Windows lab notes](WINDOWS-SESSION-HANDOFF.md) preserve paths and historical
+recovery context. Use this document and the v1 tracker for the current direction.
