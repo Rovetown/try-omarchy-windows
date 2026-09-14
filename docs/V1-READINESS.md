@@ -51,6 +51,12 @@ candidates; their reports remain historical supporting evidence.
 - [#114](https://github.com/omacom/try-omarchy-windows/pull/114): direct independent
   QCOW2 copies, including verified factory-backed sources.
 
+- [#118](https://github.com/omacom/try-omarchy-windows/pull/118): runtime `4.0.3-4`
+  repairs duplicate Neovim command ownership and preserves helpers during upgrade.
+  Compatibility revision 21 delivers the corrected repository to existing guests.
+  The complete factory build/boot and five-boot normal-updater regression pass;
+  see [ownership repair evidence](RUNTIME-OWNERSHIP-2026-09-14.md).
+
 These changes are on master, not in the published v18 assets. Native automated
 checks passed; large installed-guest portable lifecycle acceptance remains open.
 Include them in the next candidate and identify its hashes before testing.

@@ -21,6 +21,12 @@ command -v playerctl
 pacman -Qq | sort > /tmp/packages-after
 comm -23 <(sort "$HOME/upgrade-packages-before.txt") /tmp/packages-after > /tmp/packages-missing
 [[ ! -s /tmp/packages-missing ]]
+sudo pacman -Dk
+sha256sum -c "$HOME/upgrade-nvim.sha256"
+[[ $(readlink /usr/bin/omarchy-nvim-refresh) == "$(cat "$HOME/upgrade-nvim-link")" ]]
+for helper in /usr/bin/omarchy-nvim-refresh /usr/bin/omarchy-nvim-setup; do
+  [[ $(pacman -Qqo "$helper") == omarchy-nvim ]]
+done
 sudo pacman -Qk try-omarchy-runtime
 omarchy-migrate
 sha256sum -c "$HOME/upgrade-preserve.sha256"
