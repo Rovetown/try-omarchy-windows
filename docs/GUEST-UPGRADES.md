@@ -93,3 +93,33 @@ script tests passed, as did reconstruction from the complete guest patch series.
 
 This is headless guest validation. It does not complete the Windows signing,
 Hyper-V, interactive desktop, or launcher update/rollback acceptance gates.
+
+## Package-lock interruption test
+
+To investigate #90 independently of a launcher update, use the published release
+artifacts verified against the launcher's pinned `SHA256SUMS`. Decompress the
+factory image with `zstd -d --long=28 --sparse rootfs.ext4.zst -o rootfs.ext4`.
+On a Linux host with KVM, run:
+
+```sh
+python3 scripts/release/smoke-package-recovery.py \
+  /path/to/verified-release /path/to/new-evidence-directory
+```
+
+The runner copies the factory image to a new disposable 24 GiB disk and retains
+that disk and four serial logs. Allow enough host space for the image and package
+updates. Network access is needed for the fresh guest's normal Omarchy updater.
+It checks the initial lock state, runs the updater, then installs a local fixture
+package whose pre-transaction hook pauses while pacman holds its real lock. A
+competing transaction must fail without changing the lock. The test kills only
+that fixture's systemd service, reboots, verifies the stale lock still blocks
+transactions, and performs controlled recovery before completing the fixture
+installation and checking another reboot. User-file hashes must match, and package-database diagnostics and their exit
+status must remain identical to the post-update baseline. Existing database
+errors are printed and retained, not treated as a clean integrity result.
+
+The fixture scripts deliberately kill a package transaction and remove its known
+stale lock; never run them directly on a host or a valued guest. This covers a
+controlled interruption before package writes, not power loss during extraction,
+a partially installed system update, Windows launcher rollback, or the original
+reporter's unknown interruption. Passing it does not establish those other cases.
