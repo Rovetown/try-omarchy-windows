@@ -1,0 +1,322 @@
+From 7b7b467dfbb58680e0a889d1a65ce540468af3f9 Mon Sep 17 00:00:00 2001
+From: Try Omarchy <test@localhost>
+Date: Mon, 14 Sep 2026 18:21:14 -0400
+Subject: [PATCH] Limit runtime command ownership and preserve Neovim helpers
+ on upgrade
+
+---
+ guest/scripts/register-omarchy-runtime.sh     | 19 +++-
+ guest/scripts/runtime-ownership.install       | 44 +++++++++
+ guest/spec.json                               |  2 +-
+ guest/tests/test_runtime_ownership_install.py | 75 ++++++++++++++
+ guest/tests/test_runtime_package.py           | 99 +++++++++++++++++++
+ 5 files changed, 234 insertions(+), 5 deletions(-)
+ create mode 100644 guest/scripts/runtime-ownership.install
+ create mode 100644 guest/tests/test_runtime_ownership_install.py
+ create mode 100644 guest/tests/test_runtime_package.py
+
+diff --git a/guest/scripts/register-omarchy-runtime.sh b/guest/scripts/register-omarchy-runtime.sh
+index 2f696b6..b82a514 100755
+--- a/guest/scripts/register-omarchy-runtime.sh
++++ b/guest/scripts/register-omarchy-runtime.sh
+@@ -102,11 +102,17 @@ cp -a "$root/usr/share/omarchy" "$stage/usr/share/omarchy"
+ cp -a "$root/usr/share/licenses/omarchy" "$stage/usr/share/licenses/omarchy"
+ 
+ shopt -s nullglob
+-runtime_commands=("$root/usr/bin/omarchy" "$root/usr/bin"/omarchy-*)
++# Only materialized upstream command links belong to this package. Other
++# packages (for example omarchy-nvim) also install /usr/bin/omarchy-* helpers.
++runtime_commands=("$root/usr/share/omarchy/bin/"*)
+ (( ${#runtime_commands[@]} > 1 )) || fail "staged Omarchy commands are missing"
+ for command in "${runtime_commands[@]}"; do
+-  [[ -f $command ]] || fail "unexpected Omarchy command: $command"
+-  cp -a "$command" "$stage/usr/bin/$(basename "$command")"
++  name=$(basename "$command")
++  [[ -L $command && $(readlink "$command") == "/usr/bin/$name" ]] ||
++    fail "unexpected Omarchy command link: $command"
++  [[ -f $root/usr/bin/$name && ! -L $root/usr/bin/$name ]] ||
++    fail "missing materialized Omarchy command: $name"
++  cp -a "$root/usr/bin/$name" "$stage/usr/bin/$name"
+ done
+ 
+ # Register ownership and pacman backup semantics for the system configuration
+@@ -152,6 +158,8 @@ while IFS= read -r relative; do
+   printf 'backup = %s\n' "$relative" >>"$stage/.PKGINFO"
+ done <"$root/usr/share/try-omarchy/runtime-config-files"
+ 
++cp "$(dirname "$0")/runtime-ownership.install" "$stage/.INSTALL"
++
+ archive="$stage/$package_name-$package_version-any.pkg.tar.zst"
+ tar \
+   --sort=name \
+@@ -161,7 +169,7 @@ tar \
+   --numeric-owner \
+   --format=gnu \
+   -C "$stage" \
+-  -cf - .PKGINFO usr etc |
++  -cf - .PKGINFO .INSTALL usr etc |
+   zstd --force --quiet -12 --threads=1 -o "$archive"
+ 
+ # The payload is already present and was verified against the pinned source.
+@@ -180,6 +188,9 @@ query=$(pacman --config "$pacman_config" --root "$root" --dbpath "$root/var/lib/
+ pacman --config "$pacman_config" --root "$root" --dbpath "$root/var/lib/pacman" -Qk "$package_name" >/dev/null ||
+   fail "registered package does not own the complete staged runtime"
+ 
++pacman --config "$pacman_config" --root "$root" --dbpath "$root/var/lib/pacman" -Dk ||
++  fail "package database has inconsistent ownership or dependencies"
++
+ # Keep an immutable package copy in the guest's local sync repository. Without
+ # a matching sync record, pacman classifies this source-pinned runtime as an AUR
+ # package and the upstream updater attempts to hand it to yay.
+diff --git a/guest/scripts/runtime-ownership.install b/guest/scripts/runtime-ownership.install
+new file mode 100644
+index 0000000..7438306
+--- /dev/null
++++ b/guest/scripts/runtime-ownership.install
+@@ -0,0 +1,44 @@
++# Older runtime packages accidentally claimed helpers owned by omarchy-nvim.
++# libalpm removes dropped paths during upgrade even when another package owns
++# them. Retain the installed bytes before removal; never overwrite a file that
++# another package in the same transaction has already installed.
++
++pre_upgrade() {
++  local state=/var/lib/try-omarchy/runtime-ownership-recovery name path temporary
++  for name in omarchy-nvim-refresh omarchy-nvim-setup; do
++    path=/usr/bin/$name
++    pacman -Qlq try-omarchy-runtime 2>/dev/null | grep -Fx "$path" >/dev/null || continue
++    pacman -Qlq omarchy-nvim 2>/dev/null | grep -Fx "$path" >/dev/null || continue
++    [[ -f $path || -L $path ]] || return 1
++    [[ ! -L $state ]] || return 1
++    if [[ ! -e $state ]]; then
++      install -d -m 0700 "$state" || return 1
++    fi
++    [[ -d $state && $(stat -c %u:%a "$state") == 0:700 ]] || return 1
++    temporary=$(mktemp -d "$state/.helper.XXXXXX") || return 1
++    if ! cp -a -- "$path" "$temporary/$name" || ! mv -fT -- "$temporary/$name" "$state/$name"; then
++      rm -f -- "$temporary/$name"
++      rmdir "$temporary"
++      return 1
++    fi
++    rmdir "$temporary" || return 1
++  done
++}
++
++post_upgrade() {
++  local state=/var/lib/try-omarchy/runtime-ownership-recovery name path
++  [[ -e $state || -L $state ]] || return 0
++  [[ ! -L $state && -d $state && $(stat -c %u:%a "$state") == 0:700 ]] || return 1
++  for name in omarchy-nvim-refresh omarchy-nvim-setup; do
++    path=/usr/bin/$name
++    [[ -f $state/$name || -L $state/$name ]] || continue
++    # Keep the copy if its owner is absent, for explicit recovery later.
++    pacman -Qlq omarchy-nvim 2>/dev/null | grep -Fx "$path" >/dev/null || continue
++    if [[ ! -e $path && ! -L $path ]]; then
++      cp -aT -- "$state/$name" "$path" || return 1
++    fi
++    [[ -f $path || -L $path ]] || return 1
++    rm -- "$state/$name" || return 1
++  done
++  rmdir "$state" 2>/dev/null || true
++}
+diff --git a/guest/spec.json b/guest/spec.json
+index a6163df..0a26703 100644
+--- a/guest/spec.json
++++ b/guest/spec.json
+@@ -30,7 +30,7 @@
+     "versionFile": "4.0.0.alpha",
+     "channel": "quattro",
+     "license": "MIT",
+-    "packageRelease": 3
++    "packageRelease": 4
+   },
+   "supplyChain": {
+     "omarchyPackagesRepository": "https://github.com/omacom-io/omarchy-pkgs",
+diff --git a/guest/tests/test_runtime_ownership_install.py b/guest/tests/test_runtime_ownership_install.py
+new file mode 100644
+index 0000000..be1cac8
+--- /dev/null
++++ b/guest/tests/test_runtime_ownership_install.py
+@@ -0,0 +1,75 @@
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++
++INSTALL = Path(__file__).resolve().parents[1] / 'scripts/runtime-ownership.install'
++
++
++class RuntimeOwnershipInstallTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.base = Path(self.temp.name)
++        self.helpers = self.base / 'usr/bin'
++        self.helpers.mkdir(parents=True)
++        self.setup = self.helpers / 'omarchy-nvim-setup'
++        self.setup.write_text('administrator customization\n')
++        self.setup.chmod(0o755)
++        self.refresh = self.helpers / 'omarchy-nvim-refresh'
++        self.refresh.symlink_to('omarchy-nvim-setup')
++        self.state = self.base / 'recovery'
++        # Relocate only filesystem roots for unprivileged scriptlet execution.
++        script = INSTALL.read_text().replace('/var/lib/try-omarchy/runtime-ownership-recovery', str(self.state))
++        script = script.replace('/usr/bin/', str(self.helpers) + '/')
++        self.script = self.base / 'install'
++        self.script.write_text(script)
++        self.bin = self.base / 'bin'
++        self.bin.mkdir()
++        self.fake('pacman', 'printf "%s\\n" "$HELPERS/omarchy-nvim-refresh" "$HELPERS/omarchy-nvim-setup"')
++        # Production checks root ownership and mode. The fixture is user-owned;
++        # simulate only this identity, keeping mkdir/cp/mv/readlink real.
++        self.fake('stat', 'echo 0:700')
++
++    def fake(self, name, body):
++        path = self.bin / name
++        path.write_text('#!/bin/bash\n' + body + '\n')
++        path.chmod(0o755)
++
++    def invoke(self, function):
++        return subprocess.run(['bash', '-c', 'source "$1"; "$2"', '_', str(self.script), function],
++            env=dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'], HELPERS=str(self.helpers)),
++            text=True, capture_output=True)
++
++    def test_preserves_regular_file_symlink_and_modified_bytes(self):
++        self.assertEqual(self.invoke('pre_upgrade').returncode, 0)
++        self.setup.unlink()
++        self.refresh.unlink()
++        result = self.invoke('post_upgrade')
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(self.setup.read_text(), 'administrator customization\n')
++        self.assertEqual(self.setup.stat().st_mode & 0o777, 0o755)
++        self.assertEqual(os.readlink(self.refresh), 'omarchy-nvim-setup')
++        self.assertFalse(self.state.exists())
++        self.assertEqual(self.invoke('post_upgrade').returncode, 0)
++
++    def test_does_not_replace_files_installed_by_another_package(self):
++        self.assertEqual(self.invoke('pre_upgrade').returncode, 0)
++        self.setup.write_text('new package contents\n')
++        self.assertEqual(self.invoke('post_upgrade').returncode, 0)
++        self.assertEqual(self.setup.read_text(), 'new package contents\n')
++        self.assertFalse(self.state.exists())
++
++    def test_no_backup_when_runtime_does_not_own_helpers(self):
++        self.fake('pacman', '[[ $2 != try-omarchy-runtime ]] || exit 1\nprintf "%s\\n" "$HELPERS/omarchy-nvim-setup"')
++        self.assertEqual(self.invoke('pre_upgrade').returncode, 0)
++        self.assertFalse(self.state.exists())
++
++    def test_rejects_symlink_recovery_directory(self):
++        elsewhere = self.base / 'elsewhere'
++        elsewhere.mkdir()
++        self.state.symlink_to(elsewhere)
++        self.assertNotEqual(self.invoke('pre_upgrade').returncode, 0)
++        self.assertNotEqual(self.invoke('post_upgrade').returncode, 0)
++        self.assertEqual(list(elsewhere.iterdir()), [])
+diff --git a/guest/tests/test_runtime_package.py b/guest/tests/test_runtime_package.py
+new file mode 100644
+index 0000000..cbb88ba
+--- /dev/null
++++ b/guest/tests/test_runtime_package.py
+@@ -0,0 +1,99 @@
++import json
++import os
++from pathlib import Path
++import subprocess
++import tarfile
++import tempfile
++import unittest
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/register-omarchy-runtime.sh'
++
++
++class RuntimePackageTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.base = Path(self.temp.name)
++        self.root = self.base / 'root'
++        self.work = self.base / 'work'
++        self.work.mkdir()
++        for path in ('usr/bin', 'usr/share/omarchy/bin', 'usr/share/licenses/omarchy',
++                     'usr/share/try-omarchy', 'etc/sudoers.d'):
++            (self.root / path).mkdir(parents=True, exist_ok=True)
++        (self.root / 'usr/share/omarchy/version').write_text('4.0.3\n')
++        (self.root / 'usr/share/licenses/omarchy/LICENSE').write_text('license\n')
++        (self.root / 'etc/sudoers.d/test').write_text('fixture\n')
++        (self.root / 'usr/share/try-omarchy/runtime-config-files').write_text('etc/sudoers.d/test\n')
++        for name in ('omarchy', 'omarchy-version', 'omarchy-nvim-setup', 'omarchy-neighbor'):
++            command = self.root / 'usr/bin' / name
++            command.write_text('#!/bin/sh\nexit 0\n')
++            command.chmod(0o755)
++        for name in ('omarchy', 'omarchy-version'):
++            (self.root / 'usr/share/omarchy/bin' / name).symlink_to('/usr/bin/' + name)
++        self.spec = self.base / 'spec.json'
++        self.spec.write_text(json.dumps({'upstream': {'version': '4.0.3', 'packageRelease': 4,
++            'repository': 'https://example.invalid/omarchy', 'commit': 'a' * 40},
++            'image': {'sourceDateEpoch': 1789344000}}))
++        self.config = self.base / 'pacman.conf'
++        self.config.write_text('fixture\n')
++        self.bin = self.base / 'bin'
++        self.bin.mkdir()
++        # Keep real staging/tar behavior. Substitute registration and compression
++        # so archive ownership regressions run unprivileged without Arch packages.
++        self.fake('zstd', 'cat > "${@: -1}"')
++        self.fake('pacman', '''for arg in "$@"; do
++  if [[ $arg == -U ]]; then cp "${@: -1}" "$CAPTURE"; fi
++  if [[ $arg == -Q ]]; then echo 'try-omarchy-runtime 4.0.3-4'; fi
++done
++exit 0''')
++        self.capture = self.base / 'package.tar'
++
++    def fake(self, name, body):
++        path = self.bin / name
++        path.write_text('#!/bin/bash\nset -eu\n' + body + '\n')
++        path.chmod(0o755)
++
++    def run_builder(self):
++        return subprocess.run(['bash', str(SCRIPT), '--root', str(self.root), '--work', str(self.work),
++            '--spec', str(self.spec), '--pacman-config', str(self.config)],
++            env=dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'], CAPTURE=str(self.capture)),
++            text=True, capture_output=True)
++
++    def test_only_materialized_commands_enter_archive(self):
++        result = self.run_builder()
++        self.assertEqual(result.returncode, 0, result.stderr)
++        with tarfile.open(self.capture) as archive:
++            names = set(archive.getnames())
++            self.assertIn('.INSTALL', names)
++            self.assertIn('usr/bin/omarchy', names)
++            self.assertIn('usr/bin/omarchy-version', names)
++            self.assertNotIn('usr/bin/omarchy-nvim-setup', names)
++            self.assertNotIn('usr/bin/omarchy-neighbor', names)
++        self.assertTrue((self.root / 'usr/bin/omarchy-nvim-setup').exists())
++
++    def test_missing_materialized_command_fails_before_registration(self):
++        (self.root / 'usr/bin/omarchy').unlink()
++        result = self.run_builder()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('missing materialized Omarchy command', result.stderr)
++        self.assertFalse(self.capture.exists())
++
++    def test_unexpected_command_link_fails_before_registration(self):
++        link = self.root / 'usr/share/omarchy/bin/omarchy'
++        link.unlink()
++        link.symlink_to('/usr/bin/omarchy-neighbor')
++        result = self.run_builder()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('unexpected Omarchy command link', result.stderr)
++        self.assertFalse(self.capture.exists())
++
++    def test_database_failure_rejects_package(self):
++        self.fake('pacman', '''for arg in "$@"; do
++  if [[ $arg == -Dk ]]; then exit 1; fi
++  if [[ $arg == -Q ]]; then echo 'try-omarchy-runtime 4.0.3-4'; fi
++done
++exit 0''')
++        result = self.run_builder()
++        self.assertNotEqual(result.returncode, 0)
++        self.assertIn('package database has inconsistent ownership', result.stderr)
++        self.assertFalse((self.root / 'usr/share/try-omarchy/repo').exists())
+-- 
+2.55.0
+
