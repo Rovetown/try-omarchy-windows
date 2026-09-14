@@ -9,7 +9,7 @@ Try Omarchy runs the full x86_64 Arch Linux environment used by Omarchy. It is n
 - AUR packages installed with the preinstalled `yay` helper and the included `base-devel` toolchain
 - Graphical Linux applications, including Visual Studio Code
 - Web browsing and outbound networking through the Windows connection
-- Audio, two-way text and image clipboard sharing, and persistent files inside the guest
+- Audio, two-way text, image, file and folder clipboard sharing, and persistent files inside the guest
 - Host-folder sharing through the recommended `Omarchy Shared` folder or
   `-share <folder>` when the WINQ-EMU runtime is available, including CPU rendering
 
@@ -18,14 +18,19 @@ Try Omarchy runs the full x86_64 Arch Linux environment used by Omarchy. It is n
 - 64-bit Windows 10 or 11 with hardware virtualization is required.
 - ARM64 Windows PCs (Snapdragon and similar) are not supported: the launcher, runtime, and guest image are all x86_64, and setup stops with an explanation instead of blaming virtualization settings.
 - GPU acceleration depends on the patched WINQ-EMU runtime and compatible Windows graphics drivers. Try Omarchy falls back to CPU rendering when that path is unavailable.
-- USB devices, host webcams, and arbitrary PCI devices are not passed through.
+- USB management exists, but general physical-device compatibility remains unvalidated. Host webcam capture is not usable in the recorded acceptance run; arbitrary PCI passthrough is unsupported.
 - Networking uses QEMU NAT. Services inside the guest are not exposed to the Windows network automatically.
 - Host-folder sharing is not available with an external stock QEMU fallback.
 - Text and image clipboard sharing work in both directions (images travel as
-  PNG, up to 16 MiB). The published preview uses shared folders for files.
-  The [v0.0.17 candidate](COMPLETION-CANDIDATE.md) adds file and folder clipboard
-  transfer with bounded size and cache storage. Drag-and-drop remains unsupported.
+  PNG, up to 16 MiB). v18 also supports file/folder clipboard transfers and native
+  Windows drag and drop through dedicated transfer windows. Direct drops into
+  arbitrary guest applications remain unfinished.
+- Portable mode is experimental pending external-drive and second-PC acceptance.
+  Accelerated saved-session/RAM resume and bridged networking are not ready for use.
 - The launcher boots its pinned kernel and initramfs from the release image, and the guest's pacman configuration holds the `linux` package so `pacman -Syu` and `omarchy-update` leave it alone. Kernel updates arrive with guest-image updates, which also carry the matching modules onto existing disks. Forcing a different kernel package into the guest leaves it out of sync with those boot files.
-- Configuration export and restore are available through `try-omarchy-export`; see [the migration guide](MIGRATION.md). Development builds also support [stopped-VM backup and restore](BACKUP.md) from Settings or command-line options. Reset can retain the old disk and offer a full backup first. Snapshots are not available yet.
+- Configuration export and restore are available through `try-omarchy-export`; see [the migration guide](MIGRATION.md). The published preview also supports [stopped-VM backup and restore](BACKUP.md) from Settings or command-line options. Reset can retain the old disk and offer a full backup first. Snapshots, restore-as-copy and rollback are also available.
 
 Compatibility varies with Windows, CPU, GPU, and driver combinations. When reporting a problem, include those details and whether Try Omarchy selected GPU or CPU rendering.
+
+See [v1 readiness](V1-READINESS.md) for the supported-scope target and outstanding
+hardware acceptance. Current physical evidence centers on an AMD Windows 11 laptop.
