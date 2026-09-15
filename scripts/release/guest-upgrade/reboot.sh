@@ -15,6 +15,10 @@ for helper in /usr/bin/omarchy-nvim-refresh /usr/bin/omarchy-nvim-setup; do
   [[ $(pacman -Qqo "$helper") == omarchy-nvim ]]
 done
 sudo pacman -Qk try-omarchy-runtime
+sudo pacman -Qk omarchy-nvim
+expected_theme_link="../../../../.local/state/omarchy/current/theme/neovim.lua"
+[[ $(readlink /etc/skel/.config/nvim/lua/plugins/theme.lua) == "$expected_theme_link" ]]
+[[ $(readlink "$HOME/.config/nvim/lua/plugins/theme.lua") == "$expected_theme_link" ]]
 sudo systemctl restart try-omarchy-update-repository.service
 systemctl is-active try-omarchy-update-repository.service
 [[ ! -e /var/lib/pacman/db.lck ]]
