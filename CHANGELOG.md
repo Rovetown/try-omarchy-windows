@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## v0.0.19-preview - 2026-09-15
 
 - Create portable copies of normal installations directly as verified QCOW2
   disks, budgeting nonzero blocks instead of staging a backup and raw restore.
 - Copy existing portable installations directly too, with authenticated backing
   images, independent output disks and no intermediate raw materialization.
 - Retry transient Windows file locks during move and snapshot publication.
+- Repair duplicate runtime command ownership so existing guests keep the Neovim
+  helpers across an update and the package database stays clean.
 - Keep the packaged Neovim skeleton in new-user homes, restoring the Omarchy
   theme symlink the factory builder dropped. Compatibility revision 22 delivers
   the same link to existing guests and `catch-up` restores it for users who
