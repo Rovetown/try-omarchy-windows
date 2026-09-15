@@ -26,9 +26,13 @@ remaining gates. The older full-feature plan is historical, not the v1 requireme
   34941645832](https://github.com/omacom/try-omarchy-windows/actions/runs/34941645832)),
   and the launcher is pinned to it on master (`43faade`). The
   [signing-check run 34942547584](https://github.com/omacom/try-omarchy-windows/actions/runs/34942547584)
-  produced the signed test launcher artifact for the physical draft test. The
-  launcher's public `Latest` is still v18 until `publish` runs. Use
+  produced the signed test launcher artifact for the physical draft test.
+  `.github/release-notes/v0.0.19-preview.md` is committed, and every draft asset
+  was downloaded and matched against the pinned `SHA256SUMS`. The launcher's
+  public `Latest` is still v18 until `publish` runs. Use
   [RELEASING.md](RELEASING.md); source merges and guest CI artifacts are not releases.
+- After `publish`, bump the current-release references in `README.md` and
+  `docs/TESTING.md` from v0.0.18-preview to v0.0.19-preview.
 
 ## Completed in the September 15 session
 
