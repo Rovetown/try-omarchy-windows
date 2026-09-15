@@ -18,12 +18,17 @@ remaining gates. The older full-feature plan is historical, not the v1 requireme
   published September 13. No newer signed launcher or public release was made.
 - Unreleased master includes #113/#114 portable-copy and Windows publication-lock
   improvements, #118's runtime ownership repair, and #121's Neovim theme-link
-  repair. The launcher still pins v18.
+  repair.
 - The guest is Omarchy 4.0.3 with runtime `4.0.3-4` and compatibility revision
   **22** (was 21). Existing guests that take a newer launcher re-apply the
   compatibility overlay once.
-- No next release tag has been selected. Use [RELEASING.md](RELEASING.md) to prepare
-  an exact signed candidate; source merges and guest CI artifacts are not releases.
+- A **v0.0.19-preview** draft release is prepared ([Release run
+  34941645832](https://github.com/omacom/try-omarchy-windows/actions/runs/34941645832)),
+  and the launcher is pinned to it on master (`43faade`). The
+  [signing-check run 34942547584](https://github.com/omacom/try-omarchy-windows/actions/runs/34942547584)
+  produced the signed test launcher artifact for the physical draft test. The
+  launcher's public `Latest` is still v18 until `publish` runs. Use
+  [RELEASING.md](RELEASING.md); source merges and guest CI artifacts are not releases.
 
 ## Completed in the September 15 session
 
@@ -102,13 +107,15 @@ Reproduction entry points:
    stale-lock cause is unknown. Tests cover SIGKILL before package writes, not
    power loss during extraction or scriptlets. Keep active locks protected; no
    automatic lock deletion was added.
-2. **Next signed Windows candidate.** Include unreleased master changes and test
-   actual launcher/payload upgrades, interruption, forced rollback, both signed
-   feeds, pre-transfer installs and old previews skipping the stable bridge. The
-   new compatibility revision 22 must be exercised on an older installation.
-   Do not call the guest package regression a Windows update/rollback pass.
-   Consider whether this candidate should serve as the `LEGACY_UPDATE_BRIDGE_TAG`
-   if v1 is next.
+2. **v0.0.19-preview draft physical test.** The draft and pin are ready; run the
+   signed candidate from
+   [RELEASING.md](RELEASING.md#test-the-draft-on-physical-windows) on the Windows
+   laptop with a copied data directory and loopback payload. Confirm the desktop
+   and files survive, the new external kernel boots, reboot and poweroff work, the
+   revision-22 compatibility repair runs once, and a stopped first boot rolls back.
+   Then run the `publish` phase. Do not call this a Windows update/rollback pass
+   until those checks pass. Consider whether this candidate should serve as the
+   `LEGACY_UPDATE_BRIDGE_TAG` if v1 is next.
 3. **Physical coverage.** Intel/NVIDIA, full Hyper-V/Core Ultra, advertised Windows
    versions, sleep/resume, mixed-DPI displays, remote input, device switching and
    microphone behavior remain open. Use [TESTING.md](TESTING.md). Also complete
